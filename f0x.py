@@ -23,7 +23,7 @@ parser.add_argument('-s', '--site', help='Specify target site.', dest='site')
 parser.add_argument('-q', '--query', help='Dork to use. If specified, other files will not be read.', dest='query')
 parser.add_argument('-i', '--inclusive', help='This works with `query` option only, if used, will also read dorks from file. ', dest='inc', action="store_true")
 
-parser.add_argument('-C', '--catagory', help='Use dorks from this catagory only.', dest='catagory')
+parser.add_argument('-C', '--category', help='Use dorks from this category only.', dest='category')
 parser.add_argument('-S', '--severity', help='Specify minimum severity(inclusive) dork file to read, range is [0, 10], defalut: 5.', dest='severity', type=int, choices=range(11))
 parser.add_argument('-a', '--all', help='Use all the dork files to fetch result.', dest='s_all', action='store_true')
 parser.add_argument('-Q', '--quality', help='Use only top severity(>=8) dork files. ', dest='s_qual', action='store_true')
@@ -53,10 +53,39 @@ args = parser.parse_args()
 import re
 import os
 import errno
+import sys
+
+
+if not (args.site or \
+        args.query or \
+        args.category or \
+        args.severity or \
+        args.s_all or \
+        args.s_qual  or \
+        args.page_size or \
+        args.dork_size or \
+        args.max_results or \
+        args.min or \
+        args.max or \
+        args.delay or \
+        args.parallel or \
+        args.UA or \
+        args.output):
+            print "[ERROR]: no options are specified"
+            print parser.format_help()
+            quit()
+
 
 
 
 verbose = args.verbose
+
+#read config file
+def get_value(key):
+    with open(sys.path[0] + '/f0x.config', 'r') as config:
+        for line in config:
+            if line.startswith(key):
+                return line.split('=')[1].strip('\n')
 
 site=''
 # if site provided
@@ -85,12 +114,12 @@ if inclusive and not args.query:
 if verbose and inclusive:
     print "Including dorks results along with query results"
 
-catagory = ''
-if args.catagory:
-    catagory = args.catagory.strip()
+category = ''
+if args.category:
+    category = args.category.strip()
 
-if verbose and catagory:
-    print "catagory recieved ==> {}".format(catagory)
+if verbose and category:
+    print "category recieved ==> {}".format(category)
 
 severity = 5
 if args.severity:
@@ -186,34 +215,41 @@ if verbose:
     print "parallel requests set to ==> {}".format(parallel_req)
 
 
-fixed_ua = False
-useragent = ''
+useragents = []
 if args.UA:
-    useragent = args.UA.strip()
-    fixed_ua = True
+    useragents = args.UA.strip().split(',')
+else:
+    with open(get_value('useragents'), 'r') as uas:
+        useragents = [ua.strip('\n') for ua in uas]
 
-if verbose and fixed_ua:
-    print "Using User-Agent ==> {}".format(useragent)
+if verbose:
+    print "Using User-Agents ==> {}".format(useragents)
 
 out_dir = ''
 
 if args.output:
     out_dir = args.output
-
-if not os.path.exists(out_dir):
-    try:
-        os.makedirs(out_dir)
-    except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise
-
-if verbose: 
-    print "Using output directory ==> {}".format(out_dir)
+    
+    if not os.path.exists(out_dir):
+        try:
+            os.makedirs(out_dir)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
 
 out_flag = 2 
 # 2 > to save report along with json 
 # 1 > to save json only
+if not args.output and (args.json or args.report):
+    print "output directory is not specified"
+    quit()
 
 if args.json and not args.report:
     out_flag = 1
 
+if verbose: 
+    print "Using output directory ==> {}".format(out_dir)
+    if out_flag == 1:
+        print "Output will be saved in JSON format"
+    else:
+        print "Reporting is enabled, along with JSON format"
