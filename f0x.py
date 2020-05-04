@@ -75,9 +75,6 @@ if not (args.site or \
             print parser.format_help()
             quit()
 
-
-
-
 verbose = args.verbose
 
 #read config file
@@ -236,14 +233,13 @@ if args.output:
         except OSError as e:
             if e.errno != errno.EEXIST:
                 raise
+else:
+    print "[ERROR]: Output directory is not specified"
+    quit()
 
 out_flag = 2 
 # 2 > to save report along with json 
 # 1 > to save json only
-if not args.output and (args.json or args.report):
-    print "output directory is not specified"
-    quit()
-
 if args.json and not args.report:
     out_flag = 1
 
