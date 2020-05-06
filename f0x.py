@@ -25,7 +25,7 @@ parser.add_argument('-i', '--inclusive', help='This works with `query` option on
 parser.add_argument('-A', '--args', help='Specify extra query to supply with each dorks.', dest='ex_query')
 
 parser.add_argument('-C', '--category', help='Use dorks from this category only.', dest='category')
-parser.add_argument('-S', '--severity', help='Specify minimum severity(inclusive) dork file to read, range is [0, 10], defalut: 5.', dest='severity', type=int, choices=range(11))
+parser.add_argument('-S', '--severity', help='Specify minimum severity(inclusive) dork file to read, range is [0, 10], defalut: 5.', dest='severity', type=int, choices=range(1, 11))
 parser.add_argument( '--only', help='Use along with severity, to select only a particular value.', dest='s_only', action='store_true')
 parser.add_argument( '--upper', help='Use along with severity, to mark provided value as upper limit (exclusive).', dest='s_upper', action='store_true')
 parser.add_argument('-a', '--all', help='Use all the dork files to fetch result (overrides --only, --upper flags).', dest='s_all', action='store_true')
@@ -58,6 +58,11 @@ import os
 import errno
 import sys
 import urllib.parse as urlparse
+import random
+import time
+import mechanize
+import requests
+
 
 if not (args.site or \
         args.query or \
@@ -87,6 +92,21 @@ def get_value(key):
             if line.startswith(key):
                 return line.split('=')[1].strip('\n')
 
+def getNewDir(o, dn=''):
+    out_dir = o
+    if out_dir.endswith('/'):
+        out_dir += dn 
+    else:
+        out_dir += '/' + dn
+
+    if not os.path.exists(out_dir):
+        try:
+            os.makedirs(out_dir)
+        except OSError as e:
+            if e.errno != errno.EEXIST:
+                raise
+    return out_dir
+
 site=''
 # if site provided
 if args.site:
@@ -101,8 +121,8 @@ query_extra = ''
 if args.ex_query:
     query_extra = args.ex_query.strip()
 
-if verbose and args.args:
-    print ("Extra query parameters to use ==> {}".format(params))
+if verbose and args.ex_query:
+    print ("Extra query parameters to use ==> {}".format(query_extra))
 
 r_query=''
 # if raw query provided
@@ -178,6 +198,8 @@ if args.page_size:
     else:
         page_size = 30
 
+page_size = int(page_size)
+
 if verbose:
     print ("page size ==> {}".format(page_size))
 
@@ -188,14 +210,9 @@ if args.dork_size and args.dork_size >= page_size:
 if verbose:
     print ("max results per dork ==> {}".format(dork_size))
 
-max_results = -1
-if args.max_results:
-    if args.max_results >= dork_size:
-        max_results = args.max_results
-    else:
-        max_results = dork_size * 100
-else:
-    max_results = dork_size * 100
+max_results = dork_size * 100
+if args.max_results and args.max_results >= 0:
+    max_results = args.max_results
 
 if verbose:
     print ("total results limit to ==> {}".format(max_results))
@@ -248,14 +265,7 @@ if verbose:
 out_dir = ''
 
 if args.output:
-    out_dir = args.output
-    
-    if not os.path.exists(out_dir):
-        try:
-            os.makedirs(out_dir)
-        except OSError as e:
-            if e.errno != errno.EEXIST:
-                raise
+    out_dir = getNewDir(args.output) 
 else:
     print ("[ERROR]: Output directory is not specified")
     quit()
@@ -293,6 +303,16 @@ def createURL(q, s, eqs):
     u += '&btnG=Google+Search'
     return u
 
+def getSeverities():
+    sev = []
+    if severity_flag == 0:
+        sev = list (range (severity, 11))
+    elif severity_flag  == 1:
+        sev = [severity]
+    elif severity_flag  == 2:
+        sev = list (range (1, severity)) #if severity = 1, return empty set
+    return sev
+
 def getFiles(f):
     l = []
     for j in os.listdir(f):
@@ -308,10 +328,11 @@ def getFiles(f):
             l += getFiles(t)
     return l
 
-def getDorks(rq, inc, svr, cat, sf):
+def getDorks(rq, inc, svr, cat):
     dorks = []
     if rq:
-        dorks += [rq]
+        if svr == 10:
+            dorks += [rq]
         if not inc:
             return dorks
     
@@ -338,60 +359,98 @@ def getDorks(rq, inc, svr, cat, sf):
                     j = re.sub('^severity:', '', l.lstrip().lower())
                     j = j.strip()
             
-            if sf == 0:
-                if int(j) >= svr:
-                    dorks.append(d)
-            elif sf == 1:
-                if int(j) == svr:
-                    dorks.append(d)
-            elif sf == 2:
-                if int(j) < svr:
-                    dorks.append(d)
+            if int(j) == svr:
+                dorks.append(d)
 
     return dorks
 
 def wget(u):
-    return u
+    print("fetching url ===> {}".format(u))
+    hdrs = {
+            'Host': 'www.google.com',
+            'User-Agent': random.choice(useragents),
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'Referer': 'https://www.google.com/',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0, no-cache',
+            'Pragma': 'no-cache',
+            'TE': 'Trailers'
+            }
+  #  req = requests.get(u, headers=hdrs)
+  #  return req.text
+    return u 
+
+def getNewRandomDir(o, dn=''):
+    return getNewDir(getNewDir(o, dn), str(time.time_ns()))
+
+def getFileName(o, n):
+    if o.endswith('/'):
+        return o + n
+    else:
+        return o + '/' + n
+
+def persist(r, d, s, o, fc):
+    if fc == 0:
+        fd = open(getFileName(o, 'dork.info'), 'w')
+        fd.write("dork: {}\n".format(d))
+        fd.write("severity: {}\n".format(s))
+        fd.close()
+    fd = open(getFileName(o, 'dork_' + str(fc + 1)), 'w')
+    fd.write(r)
+    fd.close()
+
+def getDelay():
+    return delay + (random.random() * var_delay)
 
 def pageHasMoreResults(r):
-    return True 
+    o = re.search('aria-label="Next page"[^>]*>((Next &gt;)|(<span [^>]*>&gt;</span>))</a>', r, re.I)
+    if o:
+        return True
+    else:
+        return False 
 
-def persist(r):
-    #persist response, as per category, severity or raw
-    return
-
-mr_archived = 0
+mr_achived = 0
 def canFetchMore():
-    return (max_results - mr_archived) > 0
+    return (max_results - mr_achived) > 0
 
 # TODO: make it synchronised later
 def updateResultsCount(c):
-    global mr_archived
-    mr_archived += c
+    global mr_achived
+    mr_achived += c
 
-def processDork(d, s, qe, ps, ds, o):
+def processDork(d, s, qe, ps, ds, o, sev):
+    if not canFetchMore():
+        return
+
     u = createURL(d, s, qe)
     i = -1
     rFlag = True
+    dd = getNewRandomDir(o, 'dorks')
+    r = 0
     while rFlag and canFetchMore() and ((ps * (i + 1)) <= ds):
         url = ''
         i += 1
         if i == 0:
-            url = u + "&start=&num=" + str(ps)
+            url = "{}&start=&num={}".format(u, ps)
         else:
-            url = u + "&start=" + str(ps * i) + "&num=" + str(ps)
-        
+            url = "{}&start={}&num={}".format(u, ps * i, ps)
+        t = getDelay()
+        print ("going to sleep for {} s".format(t))
+        time.sleep(t)
         response = wget(url)
-        persist(response)
+        persist(response, d, sev, dd, r)
+        r += 1
         updateResultsCount(ps)
         rFlag = pageHasMoreResults(response)
 
 # TODO: implement thread
 def threadController():
-    for i in getDorks(r_query, inclusive, severity, category, severity_flag):
-        processDork(i, site, query_extra, page_size, dork_size, out_dir)
+    for s in getSeverities():    
+        for i in getDorks(r_query, inclusive, s, category):
+            processDork(i, site, query_extra, page_size, dork_size, out_dir, s)
 
 threadController()
-
-# process saved responses
-# prepare report
