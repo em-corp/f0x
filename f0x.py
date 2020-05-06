@@ -441,6 +441,7 @@ def processDork(d, s, qe, ps, ds, o, sev):
     rFlag = True
     dd = getNewRandomDir(o, 'dorks')
     r = 0
+    print("[*] Processing dork: {}".format(d))
     while rFlag and canFetchMore() and ((ps * (i + 1)) <= ds):
         url = ''
         i += 1
@@ -449,8 +450,12 @@ def processDork(d, s, qe, ps, ds, o, sev):
         else:
             url = "{}&start={}&num={}".format(u, ps * i, ps)
         t = getDelay()
+        print("[*] Sleeping for {} sec.".format(t))
         time.sleep(t)
+        print("[*] Processing now.")
+        print("[*] Next Page Request: {}".format(r + 1))
         response = wget(url)
+        print("[*] Got Response.")
         persist(response, d, sev, dd, r)
         r += 1
         updateResultsCount(ps)
@@ -462,6 +467,7 @@ def dbBuilder():
     for s in getSeverities():    
         for i in getDorks(r_query, inclusive, s, category):
             processDork(i, site, query_extra, page_size, dork_size, out_dir, s)
+    print("[*] Finished fetching results.")
 
 def jsonBuilder(o):
     for f in os.listdir(o):
@@ -579,13 +585,17 @@ o888o    `8. o88'   888o .8'
     fd.write("</body></html>")
     fd.close()
 
+print("[*] Building db.")
 dbBuilder()
+print("[*] Finished building db.")
 
+print("[*] Building JSON.")
 jsonBuilder(getDir(out_dir, 'dorks'))
+print("[*] Finished building JSON.")
 
 if buildReport: 
+    print("[*] Building Report.")
     reportBuilder(out_dir, 'dorks')
     print ("[*] Report saved at: {}".format(getFileName(out_dir, 'report.html')))
-
 
 print ("[*] Results saved at {}".format(out_dir))
