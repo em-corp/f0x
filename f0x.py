@@ -107,6 +107,9 @@ def getNewDir(o, dn=''):
                 raise
     return out_dir
 
+def getDir(o, dn = ''):
+    return getNewDir(o, dn)
+
 site=''
 # if site provided
 if args.site:
@@ -270,15 +273,13 @@ else:
     print ("[ERROR]: Output directory is not specified")
     quit()
 
-out_flag = 2 
-# 2 > to save report along with json 
-# 1 > to save json only
+buildReport = True
 if args.json and not args.report:
-    out_flag = 1
+    buildReport = False
 
 if verbose: 
     print ("Using output directory ==> {}".format(out_dir))
-    if out_flag == 1:
+    if not buildReport: 
         print ("Output will be saved in JSON format")
     else:
         print ("Reporting is enabled, along with JSON format")
@@ -311,6 +312,7 @@ def getSeverities():
         sev = [severity]
     elif severity_flag  == 2:
         sev = list (range (1, severity)) #if severity = 1, return empty set
+    print ("severities ===> {}".format(sev))
     return sev
 
 def getFiles(f):
@@ -380,9 +382,9 @@ def wget(u):
             'Pragma': 'no-cache',
             'TE': 'Trailers'
             }
-  #  req = requests.get(u, headers=hdrs)
-  #  return req.text
-    return u 
+    req = requests.get(u, headers=hdrs)
+    return req.text
+  #  return u 
 
 def getNewRandomDir(o, dn=''):
     return getNewDir(getNewDir(o, dn), str(time.time_ns()))
@@ -422,6 +424,17 @@ def updateResultsCount(c):
     global mr_achived
     mr_achived += c
 
+# TODO: make it async later
+def extractURLs(o, res):
+    fd = open(getFileName(o, 'result.txt'), 'a')
+
+    for pat in re.findall('\s+href="/url\?q=([^"&]*)[^"]*"[^>]*>', res, re.M|re.I):
+        if not re.search('^http(s)?://(www\.)?[^.]*\.google\.com', pat, re.I):
+            u = urlparse.unquote(pat)
+            fd.write("{}\n".format(u))
+
+    fd.close()
+
 def processDork(d, s, qe, ps, ds, o, sev):
     if not canFetchMore():
         return
@@ -446,11 +459,30 @@ def processDork(d, s, qe, ps, ds, o, sev):
         r += 1
         updateResultsCount(ps)
         rFlag = pageHasMoreResults(response)
+        print("rflag====>{}".format(rFlag))
+        extractURLs(dd, response)
 
 # TODO: implement thread
-def threadController():
+def dbBuilder():
     for s in getSeverities():    
         for i in getDorks(r_query, inclusive, s, category):
             processDork(i, site, query_extra, page_size, dork_size, out_dir, s)
 
-threadController()
+def jsonBuilder():
+    print('json builder')
+
+def reportBuilder():
+    print("report Builder")
+
+if verbose:
+    print ("[*] Start building db.")
+
+dbBuilder()
+
+if buildReport: 
+    if verbose:
+        print ("[*] Preparing Report.")
+
+    reportBuilder()
+
+print ("[*] Results saved at {}".format(out_dir))
