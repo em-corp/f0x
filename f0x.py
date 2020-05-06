@@ -62,7 +62,7 @@ import random
 import time
 import mechanize
 import requests
-
+import json
 
 if not (args.site or \
         args.query or \
@@ -426,7 +426,7 @@ def updateResultsCount(c):
 
 # TODO: make it async later
 def extractURLs(o, res):
-    fd = open(getFileName(o, 'result.txt'), 'a')
+    fd = open(getFileName(o, 'urls.txt'), 'a')
 
     for pat in re.findall('\s+href="/url\?q=([^"&]*)[^"]*"[^>]*>', res, re.M|re.I):
         if not re.search('^http(s)?://(www\.)?[^.]*\.google\.com', pat, re.I):
@@ -468,8 +468,41 @@ def dbBuilder():
         for i in getDorks(r_query, inclusive, s, category):
             processDork(i, site, query_extra, page_size, dork_size, out_dir, s)
 
-def jsonBuilder():
-    print('json builder')
+def jsonBuilder(o):
+    d = o
+    for f in os.listdir(o):
+        i = getFileName(o, f)
+
+        if os.path.isdir(i):
+            if os.path.isfile(getFileName(i, 'urls.txt')):
+                l = []
+                s = ''
+                d = ''
+
+                with open(getFileName(i, 'urls.txt'), 'r') as urls:
+                    for u in urls:
+                        l += [u.strip('\n')]
+                
+                with open(getFileName(i, 'dork.info'), 'r') as infos:
+                    for line in infos:
+                        if line.startswith('dork: '):
+                            d = re.sub('dork: ', '', line)
+                            d = d.strip('\n')
+                        elif line.startswith('severity: '):
+                            s = re.sub('severity: ', '', line)
+                            s = s.strip('\n')
+
+                fd = open(getFileName(i, 'result.json'), 'w')
+                
+                data = {
+                        'severity' : s,
+                        'dork' : d,
+                        'urls' : l
+                        }
+                print("JSON =======> {}".format(data))
+
+                fd.write(json.dumps(data))
+                fd.close()
 
 def reportBuilder():
     print("report Builder")
@@ -478,6 +511,8 @@ if verbose:
     print ("[*] Start building db.")
 
 dbBuilder()
+
+jsonBuilder(getDir(out_dir, 'dorks'))
 
 if buildReport: 
     if verbose:
