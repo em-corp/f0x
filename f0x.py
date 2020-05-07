@@ -1,6 +1,19 @@
 #!/usr/bin/env pyton3
 # -*- coding: utf-8 -*-
 
+import argparse
+import re
+import os
+import errno
+import urllib.parse as urlparse
+import random
+import time
+import mechanize
+import requests
+import json
+from git import Repo
+import shutil
+
 def banner():
     print ('''
      .o88o.   .o             o.   
@@ -12,9 +25,6 @@ def banner():
     o888o    `8. o88'   888o .8'  
     
     ''');
-banner()
-
-import argparse
 
 parser = argparse.ArgumentParser()
 
@@ -49,20 +59,13 @@ parser.add_argument('-o', '--output', help='Specify output directory', dest='out
 parser.add_argument('-j', '--json', help='Save output in JSON format only', dest='json', action="store_true")
 parser.add_argument('-R', '--report', help='Create Report along with JSON format ouput, default', dest='report', action="store_true")
 
+parser.add_argument('--update', help='Update Dorks Repo, and exit', dest='updaterepo', action="store_true")
+parser.add_argument('-L', '--list', help='List Repo categories, total dorks and exit', dest='listrepo', action="store_true")
 parser.add_argument('-v', '--verbose', help='Be verbose.', dest='verbose', action="store_true")
 
 args = parser.parse_args()
 
-import re
-import os
-import errno
-import sys
-import urllib.parse as urlparse
-import random
-import time
-import mechanize
-import requests
-import json
+banner()
 
 if not (args.site or \
         args.query or \
@@ -78,16 +81,18 @@ if not (args.site or \
         args.delay or \
         args.parallel or \
         args.UA or \
-        args.output):
-            print ("[ERROR]: no options are specified")
+        args.output or \
+        args.updaterepo or \
+        args.listrepo):
+            print ("[ERROR]: no options are specified\n\n")
             print (parser.format_help())
             quit()
 
-verbose = args.verbose
+#----------------------------------------------------------------------------------
 
 #read config file
 def get_value(key):
-    with open(sys.path[0] + '/f0x.config', 'r') as config:
+    with open(getFileName(os.path.dirname(os.path.realpath(__file__)), 'f0x.config'), 'r') as config:
         for line in config:
             if line.startswith(key):
                 return line.split('=')[1].strip('\n')
@@ -109,183 +114,6 @@ def getNewDir(o, dn=''):
 
 def getDir(o, dn = ''):
     return getNewDir(o, dn)
-
-site=''
-# if site provided
-if args.site:
-    site = args.site.strip()
-    site = re.sub(r'^http(s)?://(www\.)?', '', site)
-    site = re.sub('/.*(/)?', '', site)
-
-if verbose and args.site:
-    print ("Target recieved ==> {}".format(site))
-
-query_extra = ''
-if args.ex_query:
-    query_extra = args.ex_query.strip()
-
-if verbose and args.ex_query:
-    print ("Extra query parameters to use ==> {}".format(query_extra))
-
-r_query=''
-# if raw query provided
-if args.query:
-    r_query = args.query.strip()
-
-if verbose and args.query:
-    print ("Query provided ==> {}".format(r_query))
-
-inclusive = args.inc
-
-if inclusive and not args.query:
-    print ("[ERROR]: Query not found, but inclusive switch is on")
-    quit()
-
-if verbose and inclusive:
-    print ("Including dorks results along with query results")
-
-category = ''
-if args.category:
-    category = args.category.strip()
-
-if verbose and category:
-    print ("category recieved ==> {}".format(category))
-
-severity = 5
-if args.severity:
-    severity = args.severity
-
-if verbose and args.severity:
-    print ("Using severity ==> {}".format(severity))
-
-severity_flag = 0
-# 0 for >= severity
-# 1 for = severity
-# 2 for < severity
-if args.s_only:
-    severity_flag = 1
-if args.s_upper:
-    severity_flag = 2
-
-if args.s_all:
-    severity = 0
-    severity_flag = 0
-
-if verbose and args.s_all:
-    if args.severity:
-        print ("Severity is overridden by `--all` switch")
-    print ("Using severity ==> {}".format(severity))
-    
-if args.s_qual:
-    severity = 8
-    severity_flag = 0
-
-if verbose and args.s_qual:
-    if args.severity or args.s_all:
-        print ("Severity is overridden by `--quality` switch")
-    print ("Using severity ==> {}".format(severity))
-
-if verbose:
-    print ("severity flag ==> {}".format(severity_flag))
-
-page_size = 30
-if args.page_size:
-    page_size = args.page_size / 10
-
-    if  page_size >= 10:
-        page_size = 100
-    elif page_size >=5:
-        page_size = 50
-    elif page_size > 0 :
-        page_size = page_size * 10
-    else:
-        page_size = 30
-
-page_size = int(page_size)
-
-if verbose:
-    print ("page size ==> {}".format(page_size))
-
-dork_size = 150
-if args.dork_size and args.dork_size >= page_size:
-    dork_size = args.dork_size
-
-if verbose:
-    print ("max results per dork ==> {}".format(dork_size))
-
-max_results = dork_size * 100
-if args.max_results and args.max_results >= 0:
-    max_results = args.max_results
-
-if verbose:
-    print ("total results limit to ==> {}".format(max_results))
-
-delay = 2
-var_delay = 5 
-# total delay will be calculated as delay + (var_delay * random_no(0, 1))
-
-if args.delay and args.delay >= 0:
-    delay = args.delay
-    var_delay = 0
-else:
-    if args.min and args.max:
-        if args.min > 0 and args.max >= args.min:
-            delay = args.min
-            var_delay = args.max - args.min
-        elif args.min > 0:
-            delay = args.min
-    elif args.min:
-        if args.min > 0:
-            delay = args.min
-    elif args.max:
-        if args.max >= var_delay  :
-            delay = args.max - var_delay
-        elif args.max >= 0:
-            delay = 0
-            var_delay = args.max
-
-if verbose: 
-    print ("delay between each request ==> [{}, {}] sec".format(delay, delay + var_delay))
-
-parallel_req = 5
-if args.parallel and args.parallel > 0:
-    parallel_req = args.parallel
-
-if verbose:
-    print ("parallel requests set to ==> {}".format(parallel_req))
-
-
-useragents = []
-if args.UA:
-    useragents = args.UA.strip().split(',')
-else:
-    with open(get_value('useragents'), 'r') as uas:
-        useragents = [ua.strip('\n') for ua in uas]
-
-if verbose:
-    print ("Using User-Agents ==> {}".format(useragents))
-
-out_dir = ''
-
-if args.output:
-    out_dir = getNewDir(args.output) 
-else:
-    print ("[ERROR]: Output directory is not specified")
-    quit()
-
-buildReport = True
-if args.json and not args.report:
-    buildReport = False
-
-if verbose: 
-    print ("Using output directory ==> {}".format(out_dir))
-    if not buildReport: 
-        print ("Output will be saved in JSON format")
-    else:
-        print ("Reporting is enabled, along with JSON format")
-
-
-#---------------------------------------------------------------
 
 def query_encode(query):
     return urlparse.quote_plus(query)
@@ -329,6 +157,20 @@ def getFiles(f):
             l += getFiles(t)
     return l
 
+def getDirs(f):
+    l = []
+    for j in os.listdir(f):
+        t = f
+        if t.endswith('/'):
+            t += j
+        else:
+            t += '/' + j
+
+        if os.path.isdir(t):
+            l +=  [t]
+            l += getDirs(t)
+    return l
+
 def getDorks(rq, inc, svr, cat):
     dorks = []
     if rq:
@@ -342,11 +184,8 @@ def getDorks(rq, inc, svr, cat):
 
     if cat != '':
         chome = re.sub('\.', '/', cat)
-    
-    if dpath.endswith('/'):
-        dpath += chome
-    else:
-        dpath += '/' + chome
+   
+    dpath = getDir(dpath, chome)
 
     for i in getFiles(dpath):
         with open (i, 'r') as dfile:
@@ -364,6 +203,17 @@ def getDorks(rq, inc, svr, cat):
                 dorks.append(d)
 
     return dorks
+
+def getUserAgents():
+    uaf = get_value('useragents')
+    if not uaf.startswith('/'): #relative path
+        uaf = getFileName(os.path.dirname(os.path.realpath(__file__)), uaf)
+
+    useragents = []
+    with open(uaf, 'r') as uas:
+        useragents = [ua.strip('\n') for ua in uas]
+    return useragents
+
 
 def wget(u):
     hdrs = {
@@ -584,6 +434,308 @@ o888o    `8. o88'   888o .8'
 
     fd.write("</body></html>")
     fd.close()
+
+def getDorkRepoUrl():
+    return get_value('repo_url')
+
+def listStats():
+    dp = ''
+    try:
+        dp = get_value('dork_path')
+    except:
+        pass
+    if dp == '':
+        print("[ERROR]: No Dorks Available. Check Config file.")
+        return
+
+    for i in getDirs(dp):
+        dc = re.sub('^{}[/]?'.format(dp), '', i)
+        dc = re.sub('/', '.', dc)
+        td = len (getFiles(i)) 
+        print("[*] Category: {}".format(dc))
+        print("[**] Total Dork: {}\n".format(td))
+
+def mergedir(s, d):
+    for i in os.listdir(s):
+        if os.path.isfile(getFileName(s, i)):
+            shutil.move(getFileName(s,i), getFileName(d, i))
+        else:
+            mergedir(getDir(s, i), getDir(d, i))
+
+def pullDorksRepo():
+    print("[*] Building Dork Repo")
+    print("[*] Fetching from '{}'".format(getDorkRepoUrl()))
+
+    tmpdir = '/tmp/f0x/'
+    if os.path.exists(tmpdir):
+        try:
+            shutil.rmtree(tmpdir)
+        except:
+            tmpdir = getNewRandomDir(tmpdir)
+    
+    Repo.clone_from(getDorkRepoUrl(), tmpdir)
+    
+    print("[*] Fetching done.".format(getDorkRepoUrl()))
+
+    g = getDir(tmpdir, '.git')
+    if os.path.exists(g):
+        try:
+            shutil.rmtree(g)
+        except:
+            pass
+
+    r = getFileName(tmpdir, 'README.md')
+    if os.path.isfile(r):
+        os.remove(r)
+
+    l = getFileName(tmpdir, 'LICENSE')
+    if os.path.isfile(l):
+        os.remove(l)
+    
+    mergedir(tmpdir, getDir(get_value('dork_path')))
+
+    print("[*] Dork Repo Updated, dork location: {}".format(get_value('dork_path')))
+
+def buildConfFile(cpath):
+    r = ''
+    d = ''
+    u = ''
+    try:
+        r = get_value('repo_url')
+    except:
+        pass
+
+    try:
+        d = get_value('dork_path')
+    except:
+        pass
+
+    try:
+        u = get_value('useragents')
+    except:
+        pass
+
+    fd = open(cpath, 'w')
+    if r == '':
+        fd.write('repo_url={}\n'.format('https://github.com/em-corp/dorks.git'))
+    else:
+        fd.write('repo_url={}\n'.format(r))
+    if d == '':
+        fd.write('dork_path={}\n'.format(getDir(os.path.expanduser('~'), '.f0x/dorks')))
+    else:
+        fd.write('dork_path={}\n'.format(d))
+    if u == '':
+        fd.write('useragents=./user-agents\n')
+    else:
+        fd.write('useragents={}\n'.format(u))
+    fd.close()
+
+def configure():
+    cpath = getFileName(os.path.dirname(os.path.realpath(__file__)), 'f0x.config')
+    
+    if not os.path.isfile(cpath):
+        print ("[*] Creating Configuration file.")
+        buildConfFile(cpath)
+        print('[*] Done.')
+
+    if get_value('repo_url') == '' or \
+            get_value('dork_path') == '' or \
+            get_value('useragents') == '':
+                print("[*] Error Reading Conf file.")
+                print("[*] Creating new Configuration file.")
+                buildConfFile(cpath)
+                print('[*] Done.')
+
+#----------------------------------------------------------------------------------
+
+verbose = args.verbose
+
+if args.listrepo:
+    listStats()
+    quit()
+
+configure()
+
+if args.updaterepo:
+    pullDorksRepo()
+    quit()
+
+site=''
+# if site provided
+if args.site:
+    site = args.site.strip()
+    site = re.sub(r'^http(s)?://(www\.)?', '', site)
+    site = re.sub('/.*(/)?', '', site)
+
+if verbose and args.site:
+    print ("[DEBUG]: Target recieved ==> {}".format(site))
+
+query_extra = ''
+if args.ex_query:
+    query_extra = args.ex_query.strip()
+
+if verbose and args.ex_query:
+    print ("[DEBUG]: Extra query parameters to use ==> {}".format(query_extra))
+
+r_query=''
+# if raw query provided
+if args.query:
+    r_query = args.query.strip()
+
+if verbose and args.query:
+    print ("[DEBUG]: Query provided ==> {}".format(r_query))
+
+inclusive = args.inc
+
+if inclusive and not args.query:
+    print ("[ERROR]: Query not found, but inclusive switch is on")
+    quit()
+
+if verbose and inclusive:
+    print ("[DEBUG]: Including dorks results along with query results")
+
+category = ''
+if args.category:
+    category = args.category.strip()
+
+if verbose and category:
+    print ("[DEBUG]: Category recieved ==> {}".format(category))
+
+severity = 5
+if args.severity:
+    severity = args.severity
+
+if verbose and args.severity:
+    print ("[DEBUG]: Using severity ==> {}".format(severity))
+
+severity_flag = 0
+# 0 for >= severity
+# 1 for = severity
+# 2 for < severity
+if args.s_only:
+    severity_flag = 1
+if args.s_upper:
+    severity_flag = 2
+
+if args.s_all:
+    severity = 0
+    severity_flag = 0
+
+if verbose and args.s_all:
+    if args.severity:
+        print ("[DEBUG]: Severity is overridden by `--all` switch")
+    print ("[DEBUG]: Using severity ==> {}".format(severity))
+    
+if args.s_qual:
+    severity = 8
+    severity_flag = 0
+
+if verbose and args.s_qual:
+    if args.severity or args.s_all:
+        print ("[DEBUG]: Severity is overridden by `--quality` switch")
+    print ("[DEBUG]: Using severity ==> {}".format(severity))
+
+if verbose:
+    print ("[DEBUG]: Severity flag ==> {}".format(severity_flag))
+
+page_size = 30
+if args.page_size:
+    page_size = args.page_size / 10
+
+    if  page_size >= 10:
+        page_size = 100
+    elif page_size >=5:
+        page_size = 50
+    elif page_size > 0 :
+        page_size = page_size * 10
+    else:
+        page_size = 30
+
+page_size = int(page_size)
+
+if verbose:
+    print ("[DEBUG]: Page size ==> {}".format(page_size))
+
+dork_size = 150
+if args.dork_size and args.dork_size >= page_size:
+    dork_size = args.dork_size
+
+if verbose:
+    print ("[DEBUG]: Max results per dork ==> {}".format(dork_size))
+
+max_results = dork_size * 100
+if args.max_results and args.max_results >= 0:
+    max_results = args.max_results
+
+if verbose:
+    print ("[DEBUG]: Total results limit to ==> {}".format(max_results))
+
+delay = 2
+var_delay = 5 
+# total delay will be calculated as delay + (var_delay * random_no(0, 1))
+
+if args.delay and args.delay >= 0:
+    delay = args.delay
+    var_delay = 0
+else:
+    if args.min and args.max:
+        if args.min > 0 and args.max >= args.min:
+            delay = args.min
+            var_delay = args.max - args.min
+        elif args.min > 0:
+            delay = args.min
+    elif args.min:
+        if args.min > 0:
+            delay = args.min
+    elif args.max:
+        if args.max >= var_delay  :
+            delay = args.max - var_delay
+        elif args.max >= 0:
+            delay = 0
+            var_delay = args.max
+
+if verbose: 
+    print ("[DEBUG]: Delay between each request ==> [{}, {}] sec".format(delay, delay + var_delay))
+
+parallel_req = 5
+if args.parallel and args.parallel > 0:
+    parallel_req = args.parallel
+
+if verbose:
+    print ("[DEBUG]: Parallel requests set to ==> {}".format(parallel_req))
+
+
+useragents = []
+if args.UA:
+    useragents = args.UA.strip().split(',')
+else:
+#    with open(get_value('useragents'), 'r') as uas:
+ #       useragents = [ua.strip('\n') for ua in uas]
+    useragents = getUserAgents()
+
+if verbose:
+    print ("[DEBUG]: Using User-Agents ==> {}".format(useragents))
+
+out_dir = ''
+
+if args.output:
+    out_dir = getNewDir(args.output) 
+else:
+    print ("[ERROR]: Output directory is not specified")
+    quit()
+
+buildReport = True
+if args.json and not args.report:
+    buildReport = False
+
+if verbose: 
+    print ("[DEBUG]: Using output directory ==> {}".format(out_dir))
+    if not buildReport: 
+        print ("[DEBUG]: Output will be saved in JSON format")
+    else:
+        print ("[DEBUG]: Reporting is enabled, along with JSON format")
+
+#----------------------------------------------------------------------------------
 
 print("[*] Building db.")
 dbBuilder()
