@@ -156,7 +156,7 @@ class Prettify:
     def p_warn(text):
         print("[{}]: {}".format(Prettify.red('WARN'), text))
     
-    def p_dbug(text):
+    def p_debug(text):
         print("[{}]: {}".format(Prettify.as_bold(Prettify.yellow('DEBUG')), 
             text))
 

@@ -134,7 +134,7 @@ class Fox:
             pp.p_error("Dorks path not exists, Check config file.")
             return
         else:
-            if dp = '':
+            if dp == '':
                 pp.p_error("Dorks path not defined, Check config file.")
                 return
 
@@ -153,7 +153,7 @@ class Fox:
 
     def list_dorks_stats():
         dp = Fox.get_dork_path()
-        if dp is None or dp = '':
+        if dp is None or dp == '':
             pp.p_error("Dorks path not defined, Check config file.")
             return
 
@@ -213,3 +213,161 @@ if args.listrepo:
 if args.updaterepo:
     Fox.update_dorks_repo()
     quit()
+
+site = ''
+if args.site:
+    site = args.site.strip()
+    site = re.sub(r'^http(s)?://(www\.)?', '', site)
+    site = re.sub('/.*(/)?', '', site)
+
+if verbose and args.site:
+    pp.p_debug("Using target ==> {}".format(site))
+
+query_extra = ''
+if args.ex_query:
+    query_extra = args.ex_query.strip()
+
+if verbose and args.ex_query:
+    pp.p_debug("Using extra query parameters ==> {}".format(query_extra))
+
+r_query=''
+# if raw query provided
+if args.query:
+    r_query = args.query.strip()
+
+if verbose and args.query:
+    pp.p_debug("Using query ==> {}".format(r_query))
+
+inclusive = args.inc
+
+if inclusive and not args.query:
+    pp.p_error("Query not found, but inclusive switch is on")
+    quit()
+
+if verbose and inclusive:
+    pp.p_debug("Including dorks results along with query results")
+
+category = ''
+if args.category:
+    category = args.category.strip()
+
+if verbose and category:
+    pp.p_debug("Using category ==> {}".format(category))
+
+severity = 5
+if args.severity:
+    severity = args.severity
+
+if verbose and args.severity:
+    pp.p_debug("Using severity ==> {}".format(severity))
+
+severity_flag = 0
+# 0 for >= severity
+# 1 for = severity
+# 2 for < severity
+if args.s_only:
+    severity_flag = 1
+if args.s_upper:
+    severity_flag = 2
+
+if args.s_all:
+    severity = 0
+    severity_flag = 0
+
+if verbose and args.s_all:
+    if args.severity:
+        pp.p_debug("Severity is overridden by `--all` switch")
+    pp.p_debug(" Using severity ==> {}".format(severity))
+    
+if args.s_qual:
+    severity = 8
+    severity_flag = 0
+
+if verbose and args.s_qual:
+    if args.severity or args.s_all:
+        pp.p_debug("Severity is overridden by `--quality` switch")
+    pp.p_debug("Using severity ==> {}".format(severity))
+
+if verbose:
+    s_m = ''
+    if severity_flag == 0:
+        s_m = 'min'
+    elif severity_flag == 1:
+        s_m = 'only'
+    elif severity_flag == 2:
+        s_m = 'max'
+    pp.p_debug("Using Severity as ==> {}".format(s_m))
+
+page_size = args.page_size
+
+if verbose:
+    pp.p_debug("Using page size ==> {}".format(page_size))
+
+dork_size = 150
+if args.dork_size and args.dork_size >= page_size:
+    dork_size = args.dork_size
+
+if verbose:
+    pp.p_debug("Max results per dork ==> {}".format(dork_size))
+
+# defaults to 100 dorks 
+max_results = dork_size * 100
+if args.max_results and args.max_results >= 0:
+    max_results = args.max_results
+
+if verbose:
+    pp.p_debug("Total results limit to ==> {}".format(max_results))
+
+s_delay = 2
+e_delay = 7
+if args.delay and args.delay >= 0:
+    s_delay = e_delay = args.delay
+else:
+    if args.min and args.max:
+        s_delay = args.min
+        e_delay = args.max
+    elif args.min:
+        s_delay = args.min
+        e_delay = s_delay + 5
+    elif args.max:
+        e_delay = args.max
+        s_delay = 0
+        if e_delay - 5 > 0:
+            s_delay = e_delay - 5
+
+if verbose: 
+    pp.p_debug("Using delay range ==> [{}, {}] sec".format(s_delay, e_delay))
+
+parallel_req = 5
+if args.parallel and args.parallel > 0:
+    parallel_req = args.parallel
+
+if verbose:
+    pp.p_debug("Using parallel requests ==> {}".format(parallel_req))
+
+useragent = ''
+if args.UA:
+    useragent = args.UA.strip()
+
+if verbose and args.UA:
+    pp.p_debug("Using User-Agent ==> {}".format(useragent))
+
+out_dir = ''
+if args.output:
+    out_dir = dutil.create_dir(args.output.strip()) 
+else:
+    pp.p_error("Output directory is not specified")
+    quit()
+
+buildReport = True
+if args.json and not args.report:
+    buildReport = False
+
+if verbose: 
+    pp.p_debug("Using output directory ==> {}".format(out_dir))
+    if not buildReport: 
+        pp.p_debug("Output will be saved in JSON format")
+    else:
+        pp.p_debug("Reporting is enabled, along with JSON format")
+
+
