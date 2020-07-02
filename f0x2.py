@@ -7,11 +7,15 @@ __VERSION__ = "1.0"
 import argparse
 import re
 import os
+import time
 from git import Repo
 from lib.prettyPrint import Prettify as pp
 from lib.config import ConfigManager as conf
 from lib.utils import DirUtil as dutil
 from lib.utils import FileUtil as futil
+from lib.google import GoogleSearch as gs
+from lib.utils import Random as rand
+from lib.useragents import UA 
 
 def banner():
     print(pp.green('  .o88o.   .o             o.'))
@@ -118,18 +122,150 @@ if not (args.site or \
 #------------------------------------------------------------------------------
 
 class Fox:
-    def _load_conf():
+    def __init__(self):
+        self.verbose = None
+        self.site = None
+        self.ex_q = None
+        self.raw_q = None
+        self.inc = None
+        self.cat = None
+        self.sev = None
+        self.sev_flag = None
+        self.psize = None
+        self.dsize = None
+        self.max_res = None
+        self.del_range = [None, None]
+        self.par = None
+        self.UA = None
+        self.out_dir = None
+        self.breport = None
+        self.mr_achived = 0
+
+    def set_site(self, site):
+        self.site = site
+
+    def get_site(self):
+        return self.site
+
+    def set_ex_query(self, q):
+       self.ex_q = q
+
+    def get_ex_query(self):
+        return self.ex_q
+
+    def set_raw_query(self, q):
+        self.raw_q = q
+
+    def get_raw_query(self):
+        return self.raw_q
+
+    def set_inc_q(self):
+        self.inc = True
+    
+    def unset_inc_q(self):
+        self.inc = False
+
+    def get_inc_q(self):
+        return self.inc
+
+    def set_category(self, c):
+        self.cat = c
+
+    def get_category(self):
+        return self.cat
+
+    def set_severity(self, s):
+        self.sev = s
+
+    def get_severity(self):
+        return self.sev
+
+    def set_severity_flag(self, sf):
+        self.sev_flag = sf
+
+    def get_severity_flag(self):
+        return self.sev_flag
+
+    def set_page_size(self, ps):
+        self.psize = ps
+
+    def get_page_size(self):
+        return self.psize
+
+    def set_dork_size(self, ds):
+        self.dsize = ds
+
+    def get_dork_size(self):
+        return self.dsize
+    
+    def set_max_results(self, mr):
+        self.max_res = mr
+
+    def get_max_results(self):
+        return self.max_res
+
+    def set_delay_range(self, s, e):
+        self.del_range = [s, e]
+
+    def get_delay_range(self):
+        return self.del_range
+
+    def get_delay_start(self):
+        return self.get_delay_range()[0]
+
+    def get_delay_end(self):
+        return self.get_delay_range()[1]
+
+    def set_max_parallel(self, p):
+        self.par = p
+
+    def get_max_parallel(self):
+        return self.par
+
+    def set_ua(self, ua):
+        self.UA = ua
+
+    def get_ua(self):
+        return self.UA
+
+    def has_ua(self):
+        if self.UA and not (self.UA == ''):
+            return True
+        return False
+
+    def set_out_dir(self, d):
+        self.out_dir = d
+
+    def get_out_dir(self):
+        return self.out_dir
+
+    def set_build_report(self):
+        self.breport = True
+
+    def unset_build_report(self):
+        self.breport = False
+
+    def get_build_report(self):
+        return self.breport
+
+    def set_verbose(self):
+        self.verbose = True
+
+    def is_verbose(self):
+        return self.verbose
+
+    def _load_conf(self):
         conf.load('f0x2.config')
     
-    def get_conf():
+    def get_conf(self):
         if conf.getConfig is None:
-            Fox._load_conf()
+            self._load_conf()
         return conf.getConfig()
 
-    def get_dork_path():
+    def get_dork_path(self):
         dp = ''
         try:
-            dp = Fox.get_conf().get('dork_path')
+            dp = self.get_conf().get('dork_path')
         except:
             pp.p_error("Dorks path not exists, Check config file.")
             return
@@ -151,8 +287,8 @@ class Fox:
 
         return dp
 
-    def list_dorks_stats():
-        dp = Fox.get_dork_path()
+    def list_dorks_stats(self):
+        dp = self.get_dork_path()
         if dp is None or dp == '':
             pp.p_error("Dorks path not defined, Check config file.")
             return
@@ -168,9 +304,9 @@ class Fox:
             pp.p_log("Category: {}".format(dc))
             pp.p_log("Total Dorks: {}\n".format(td), '**')
 
-    def update_dorks_repo():
+    def update_dorks_repo(self):
         pp.p_log("Building Dork Repo.")
-        repo_url = Fox.get_conf().get('repo_url')
+        repo_url = self.get_conf().get('repo_url')
         pp.p_log("Fetching from '{}'".format(repo_url))
     
         tmpdir = dutil.create_temp_dir('f0x', 'repo_')
@@ -198,125 +334,237 @@ class Fox:
         else:
             os.remove(f)
 
-        dutil.merge_dirs(tmpdir, Fox.get_dork_path)
+        dutil.merge_dirs(tmpdir, self.get_dork_path)
         pp.p_log("Dork Repo updated.")
 
+    def get_severity_list(self):
+        sev = []
+        s = self.get_severity()
+        s_f = self.get_severity_flag()
 
+        if s_f == 0:
+            sev = list(range(s, 11))
+        elif s_f  == 1:
+            sev = [s]
+        elif s_f  == 2:
+            sev = list(range(1, s)) #if severity = 1, return empty set
+
+        return sev
+
+    def get_dorks(self, svr):
+        dorks = []
+        if self.get_raw_query():
+            if svr == 10:
+                dorks += [self.get_raw_query()]
+            if not self.get_inc_q():
+                return dorks
+    
+        dpath = self.get_dork_path()
+        chome = ''
+
+        if self.get_category() and self.get_category() != '':
+            chome = re.sub('\.', '/', self.get_category())
+   
+        dpath = dutil.get_dir(dpath, chome)
+
+        for i in dutil.get_files_list(dpath, True):
+            with open (i, 'r') as dfile:
+                d = ''
+                j = ''
+                for l in dfile:
+                    if l.lstrip().lower().startswith('dork:'):
+                        d = re.sub('^[dD][oO][rR][kK]:', '', l.lstrip())
+                        d = d.strip()
+                    elif l.lstrip().lower().startswith('severity:'):
+                        j = re.sub('^severity:', '', l.lstrip().lower())
+                        j = j.strip()
+            
+                if int(j) == svr:
+                    dorks.append(d)
+
+        return dorks
+   
+    def _get_count(self):
+        self.mr_achived
+
+    def _set_count(self, c):
+        self.mr_achived = c
+
+    def _update_results_count(self, c):
+        self._set_count(self._get_count() + c)
+
+    def _can_fetch_more(self):
+        return (self.get_max_results() - self._get_count()) > 0
+
+    def persist(self, r, d, s, o, fc):
+        if fc == 1:
+            fd = open(futil.join_names(o, 'dork.info'), 'w')
+            fd.write("dork: {}\n".format(d))
+            fd.write("severity: {}\n".format(s))
+            fd.close()
+        fd = open(futil.join_names(o, 'dork_page_' + str(fc)), 'w')
+        fd.write(r)
+        fd.close()
+
+    def process_dork(self, d, s):
+        if not self._can_fetch_more():
+            return
+
+        i = 0
+        rFlag = True
+        dd = dutil.create_random_dir(dutil.create_dir(self.get_out_dir(), \
+                'dorks'), 'dork_')
+        pp.p_log("Processing dork: {}".format(d))
+
+        while rFlag and self._can_fetch_more() and \
+                ((self.get_page_size() * i) <= self.get_dork_size()):
+                    i += 1
+                    url = gsrch.prepare_URL(d, self.get_site(), \
+                            self.get_ex_query(), i, self.get_page_size())
+                    t = rand.rand_between(self.get_delay_start(), \
+                            self.get_delay_end())
+
+                    pp.p_log("Sleeping for {} sec.".format(t))
+                    time.sleep(t)
+                    pp.p_log("Processing now.")
+                    pp.p_log("#Page to fetch: {}".format(i))
+
+                    if self.has_ua():
+                        ua = self.get_ua()
+                    else:
+                        ua = UA.get_random_ua()
+                    if self.is_verbose():
+                        pp.p_debug("Using UA ==> {}".format(ua))
+
+                    response = gsrch.fetch(url, ua)
+                    pp.p_log("Got Response.")
+        
+                    self.persist(response, d, s, dd, i)
+                    self._update_results_count(self.get_page_size())
+                    rFlag = gsrch.has_next(response)
+                    futil.dump_list(futil.join_names(dd, 'urls.txt'), \
+                            gsrch.extract_urls(response))
+
+    def dbBuilder(self):
+        for s in self.get_severity_list():
+            for d in self.get_dorks(s):
+                self.process_dork(d, s)
 
 #------------------------------------------------------------------------------
-verbose = args.verbose
+fox = Fox()
+
+if args.verbose:
+    fox.set_verbose()
 
 if args.listrepo:
-    Fox.list_dorks_stats()
+    fox.list_dorks_stats()
     quit()
 
 if args.updaterepo:
-    Fox.update_dorks_repo()
+    fox.update_dorks_repo()
     quit()
 
-site = ''
 if args.site:
+    site = ''
     site = args.site.strip()
     site = re.sub(r'^http(s)?://(www\.)?', '', site)
     site = re.sub('/.*(/)?', '', site)
 
-if verbose and args.site:
-    pp.p_debug("Using target ==> {}".format(site))
+    fox.set_site(site)
 
-query_extra = ''
+    if fox.is_verbose():
+        pp.p_debug("Using target ==> {}".format(fox.get_site()))
+
 if args.ex_query:
-    query_extra = args.ex_query.strip()
+    fox.set_ex_query(args.ex_query.strip())
 
-if verbose and args.ex_query:
-    pp.p_debug("Using extra query parameters ==> {}".format(query_extra))
+    if fox.is_verbose():
+        pp.p_debug("Using extra query parameters ==> {}".format(fox.\
+                get_ex_query()))
 
-r_query=''
-# if raw query provided
 if args.query:
-    r_query = args.query.strip()
+    fox.set_raw_query(args.query.strip())
 
-if verbose and args.query:
-    pp.p_debug("Using query ==> {}".format(r_query))
+    if fox.is_verbose():
+        pp.p_debug("Using query ==> {}".format(fox.get_raw_query()))
 
-inclusive = args.inc
+if args.inc:
+    if not args.query:
+        pp.p_error("Query not found, but inclusive switch is on")
+        quit()
 
-if inclusive and not args.query:
-    pp.p_error("Query not found, but inclusive switch is on")
-    quit()
+    fox.set_inc_q()
+    if fox.is_verbose():
+        pp.p_debug("Including dorks results along with query results")
 
-if verbose and inclusive:
-    pp.p_debug("Including dorks results along with query results")
-
-category = ''
 if args.category:
-    category = args.category.strip()
+    fox.set_category(args.category.strip())
 
-if verbose and category:
-    pp.p_debug("Using category ==> {}".format(category))
+    if fox.is_verbose():
+        pp.p_debug("Using category ==> {}".format(fox.get_category()))
 
-severity = 5
+fox.set_severity(5)
+fox.set_severity_flag(0)
+
 if args.severity:
-    severity = args.severity
+    fox.set_severity(args.severity)
 
-if verbose and args.severity:
-    pp.p_debug("Using severity ==> {}".format(severity))
-
-severity_flag = 0
 # 0 for >= severity
 # 1 for = severity
 # 2 for < severity
 if args.s_only:
-    severity_flag = 1
+    fox.set_severity_flag(1)
 if args.s_upper:
-    severity_flag = 2
+    fox.set_severity_flag(2)
 
 if args.s_all:
-    severity = 0
-    severity_flag = 0
+    fox.set_severity(0)
+    fox.set_severity_flag(0)
 
-if verbose and args.s_all:
+if fox.is_verbose() and args.s_all:
     if args.severity:
         pp.p_debug("Severity is overridden by `--all` switch")
-    pp.p_debug(" Using severity ==> {}".format(severity))
     
 if args.s_qual:
-    severity = 8
-    severity_flag = 0
+    fox.set_severity(8)
+    fox.set_severity_flag(0)
 
-if verbose and args.s_qual:
+if fox.is_verbose() and args.s_qual:
     if args.severity or args.s_all:
         pp.p_debug("Severity is overridden by `--quality` switch")
-    pp.p_debug("Using severity ==> {}".format(severity))
 
-if verbose:
+if fox.is_verbose():
     s_m = ''
-    if severity_flag == 0:
+    if fox.get_severity_flag() == 0:
         s_m = 'min'
-    elif severity_flag == 1:
+    elif fox.get_severity_flag() == 1:
         s_m = 'only'
-    elif severity_flag == 2:
+    elif fox.get_severity_flag() == 2:
         s_m = 'max'
+    pp.p_debug("Using severity ==> {}".format(fox.get_severity()))
     pp.p_debug("Using Severity as ==> {}".format(s_m))
 
-page_size = args.page_size
+fox.set_page_size(30)
+if args.page_size:
+    fox.set_page_size(args.page_size)
 
-if verbose:
-    pp.p_debug("Using page size ==> {}".format(page_size))
+if fox.is_verbose():
+    pp.p_debug("Using page size ==> {}".format(fox.get_page_size()))
 
-dork_size = 150
-if args.dork_size and args.dork_size >= page_size:
-    dork_size = args.dork_size
+fox.set_dork_size(150)
+if args.dork_size:
+    fox.set_dork_size(args.dork_size)
 
-if verbose:
-    pp.p_debug("Max results per dork ==> {}".format(dork_size))
+if fox.is_verbose():
+    pp.p_debug("Max results per dork ==> {}".format(fox.get_dork_size()))
 
 # defaults to 100 dorks 
-max_results = dork_size * 100
+fox.set_max_results(fox.get_dork_size() * 100)
 if args.max_results and args.max_results >= 0:
-    max_results = args.max_results
+    fox.set_max_results(args.max_results)
 
-if verbose:
-    pp.p_debug("Total results limit to ==> {}".format(max_results))
+if fox.is_verbose():
+    pp.p_debug("Total results limit to ==> {}".format(fox.get_max_results()))
 
 s_delay = 2
 e_delay = 7
@@ -335,39 +583,42 @@ else:
         if e_delay - 5 > 0:
             s_delay = e_delay - 5
 
-if verbose: 
-    pp.p_debug("Using delay range ==> [{}, {}] sec".format(s_delay, e_delay))
+fox.set_delay_range(s_delay, e_delay)
+if fox.is_verbose(): 
+    pp.p_debug("Using delay range ==> [{}, {}] sec".format\
+            (fox.get_delay_start(), fox.get_delay_end()))
 
-parallel_req = 5
+fox.set_max_parallel(5)
 if args.parallel and args.parallel > 0:
-    parallel_req = args.parallel
+    fox.set_max_parallel(args.parallel)
 
-if verbose:
-    pp.p_debug("Using parallel requests ==> {}".format(parallel_req))
+if fox.is_verbose():
+    pp.p_debug("Using parallel requests ==> {}".format(\
+            fox.get_max_parallel()))
 
-useragent = ''
 if args.UA:
-    useragent = args.UA.strip()
+    fox.set_ua(args.UA.strip())
 
-if verbose and args.UA:
-    pp.p_debug("Using User-Agent ==> {}".format(useragent))
+if fox.is_verbose() and fox.has_ua():
+    pp.p_debug("Using User-Agent ==> {}".format(fox.get_ua()))
 
-out_dir = ''
 if args.output:
-    out_dir = dutil.create_dir(args.output.strip()) 
+    fox.set_out_dir(dutil.create_dir(args.output.strip()))
 else:
     pp.p_error("Output directory is not specified")
     quit()
 
-buildReport = True
+fox.set_build_report()
 if args.json and not args.report:
-    buildReport = False
+    fox.unset_build_report()
 
-if verbose: 
-    pp.p_debug("Using output directory ==> {}".format(out_dir))
-    if not buildReport: 
+if fox.is_verbose(): 
+    pp.p_debug("Using output directory ==> {}".format(fox.get_out_dir()))
+    if fox.get_build_report():
         pp.p_debug("Output will be saved in JSON format")
     else:
         pp.p_debug("Reporting is enabled, along with JSON format")
 
-
+pp.p_log("Building db.")
+fox.dbBuilder()
+pp.p_log("Finished building db")

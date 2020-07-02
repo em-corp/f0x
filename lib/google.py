@@ -54,7 +54,7 @@ class GoogleSearch:
                 'Pragma': 'no-cache',
                 'TE': 'Trailers'
                 }
-        return requests.get(u, headers=hdrs).text
+        return requests.get(url, headers=hdrs).text
 
     def has_next(text):
         o = re.search('aria-label="Next page"[^>]*>((Next &gt;)|\

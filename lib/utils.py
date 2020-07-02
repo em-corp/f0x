@@ -100,6 +100,11 @@ class FileUtil:
         return FileUtil.create_random_file(FileUtil.join_names('/tmp/', \
                 dname), prefix)
 
+    def dump_list(ofile, l):
+        if l:
+            with open(ofile, 'w') as f:
+                for i in l:
+                    f.write("{}\n".format(i))
 
 class Random:
     def rand_between(start, end):
