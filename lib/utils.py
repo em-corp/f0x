@@ -4,6 +4,7 @@ import os
 import time
 import errno
 import shutil
+import random
 
 class DirUtil:
     def join_names(parent, child):
@@ -99,5 +100,17 @@ class FileUtil:
         return FileUtil.create_random_file(FileUtil.join_names('/tmp/', \
                 dname), prefix)
 
+
+class Random:
+    def rand_between(start, end):
+        if start < 0:
+            raise Exception('Require positive number')
+        if end < 0:
+            raise Exception('Require positive number')
+         
+        return start + ((end - start) * random.random())
+
+    def rand_no(max_no):
+        return Random.rand_between(0, max_no)
 
 

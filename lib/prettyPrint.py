@@ -144,3 +144,25 @@ class Prettify:
     def as_normal(text):
         return s.NORMAL + Prettify.__cont__(text, s.RESET_ALL, s.BRIGHT) + \
                 s.RESET_ALL
+
+    # *** logger ***
+
+    def p_error(text):
+        print("[{}]: {}".format(Prettify.as_bold(Prettify.red('ERROR')), text))
+
+    def p_info(text):
+        print("[{}]: {}".format(Prettify.cyan('INFO'), text))
+
+    def p_warn(text):
+        print("[{}]: {}".format(Prettify.red('WARN'), text))
+    
+    def p_dbug(text):
+        print("[{}]: {}".format(Prettify.as_bold(Prettify.yellow('DEBUG')), 
+            text))
+
+    def p_log(text, header = '*'):
+        print("[{}]: {}".format(Prettify.as_bold(Prettify.blue(header)), text))
+
+    def p_clog(text, header):
+        print("[{}]: {}".format(header, text))
+

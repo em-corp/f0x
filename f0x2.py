@@ -4,7 +4,14 @@
 __NAME__    = "f0x.py"
 __VERSION__ = "1.0"
 
+import argparse
+import re
+import os
+from git import Repo
 from lib.prettyPrint import Prettify as pp
+from lib.config import ConfigManager as conf
+from lib.utils import DirUtil as dutil
+from lib.utils import FileUtil as futil
 
 def banner():
     print(pp.green('  .o88o.   .o             o.'))
@@ -14,9 +21,6 @@ def banner():
     print(pp.green('  888    88      ' + pp.yellow('Y888') + '       88'))
     print(pp.green('  888    `8.   ' + pp.yellow('.o8"\'88b') + '    .8\''))
     print(pp.green(' o888o    `8. ' + pp.yellow('o88\'   888o') + ' .8\''))
-
-
-import argparse
 
 parser = argparse.ArgumentParser()
 
@@ -87,7 +91,125 @@ parser.add_argument('-v', '--verbose', help='Be verbose.', dest='verbose',
 
 args = parser.parse_args()
 
-
-
 banner()
 print("\t{} v{}".format(pp.as_bold(pp.red(__NAME__)), pp.blue(__VERSION__)))
+
+if not (args.site or \
+        args.query or \
+        args.category or \
+        args.severity or \
+        args.s_all or \
+        args.s_qual  or \
+        args.page_size or \
+        args.dork_size or \
+        args.max_results or \
+        args.min or \
+        args.max or \
+        args.delay or \
+        args.parallel or \
+        args.UA or \
+        args.output or \
+        args.updaterepo or \
+        args.listrepo):
+            pp.p_error('No options are specified.')
+            print (parser.format_help())
+            quit()
+
+#------------------------------------------------------------------------------
+
+class Fox:
+    def _load_conf():
+        conf.load('f0x2.config')
+    
+    def get_conf():
+        if conf.getConfig is None:
+            Fox._load_conf()
+        return conf.getConfig()
+
+    def get_dork_path():
+        dp = ''
+        try:
+            dp = Fox.get_conf().get('dork_path')
+        except:
+            pp.p_error("Dorks path not exists, Check config file.")
+            return
+        else:
+            if dp = '':
+                pp.p_error("Dorks path not defined, Check config file.")
+                return
+
+        if dp.startswith('~'):
+            dp = os.path.expanduser(dp)
+        elif dp.startswith('/'):
+            pass
+        elif dp.startswith('./'):
+            cwd = os.path.realpath('.')
+            dp = dutil.join_names(cwd, dp[2:])
+        else:
+            cwd = os.path.realpath('.')
+            dp = dutil.join_names(cwd, dp)
+
+        return dp
+
+    def list_dorks_stats():
+        dp = Fox.get_dork_path()
+        if dp is None or dp = '':
+            pp.p_error("Dorks path not defined, Check config file.")
+            return
+
+        dl = dutil.get_dir_list(dp, True)
+        if len(dl) == 0:
+            pp.p_log("No Dorks available, Update dork repo.")
+
+        for i in dl: 
+            dc = re.sub('^{}[/]?'.format(dp), '', i)
+            dc = re.sub('/', '.', dc)
+            td = len (dutil.get_files_list(i, True))
+            pp.p_log("Category: {}".format(dc))
+            pp.p_log("Total Dorks: {}\n".format(td), '**')
+
+    def update_dorks_repo():
+        pp.p_log("Building Dork Repo.")
+        repo_url = Fox.get_conf().get('repo_url')
+        pp.p_log("Fetching from '{}'".format(repo_url))
+    
+        tmpdir = dutil.create_temp_dir('f0x', 'repo_')
+        Repo.clone_from(repo_url, tmpdir)
+        pp.p_log("Done Fetching.")
+
+        try:
+            g = dutil.get_dir(tmpdir, '.git')
+        except:
+            pass
+        else:
+            dutil.rmdir(g)
+
+        try:
+            f = futil.get_file(tmpdir, 'README.md')
+        except:
+            pass
+        else:
+            os.remove(f)
+        
+        try:
+            f = futil.get_file(tmpdir, 'LICENSE')
+        except:
+            pass
+        else:
+            os.remove(f)
+
+        dutil.merge_dirs(tmpdir, Fox.get_dork_path)
+        pp.p_log("Dork Repo updated.")
+
+
+
+#------------------------------------------------------------------------------
+verbose = args.verbose
+
+if args.listrepo:
+    Fox.list_dorks_stats()
+    quit()
+
+if args.updaterepo:
+    Fox.update_dorks_repo()
+    quit()
