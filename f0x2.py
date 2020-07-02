@@ -419,15 +419,19 @@ class Fox:
         while rFlag and self._can_fetch_more() and \
                 ((self.get_page_size() * i) <= self.get_dork_size()):
                     i += 1
+                    pp.p_log("Page request: {}".format(i))
                     url = gsrch.prepare_URL(d, self.get_site(), \
                             self.get_ex_query(), i, self.get_page_size())
                     t = rand.rand_between(self.get_delay_start(), \
                             self.get_delay_end())
 
-                    pp.p_log("Sleeping for {} sec.".format(t))
+                    if self.is_verbose():
+                        pp.p_debug("Sleeping for {} sec.".format(t))
+
                     time.sleep(t)
-                    pp.p_log("Processing now.")
-                    pp.p_log("#Page to fetch: {}".format(i))
+                    if self.is_verbose():
+                        pp.p_bebug("Processing now.")
+                        pp.p_debug("#Page to fetch: {}".format(i))
 
                     if self.has_ua():
                         ua = self.get_ua()
@@ -437,11 +441,16 @@ class Fox:
                         pp.p_debug("Using UA ==> {}".format(ua))
 
                     response = gsrch.fetch(url, ua)
-                    pp.p_log("Got Response.")
-        
+                    if self.is_verbose():
+                        pp.p_debug("Got Response.")
+
+                    if self.is_verbose():
+                        pp.p_debug("Saving Response.")
                     self.persist(response, d, s, dd, i)
                     self._update_results_count(self.get_page_size())
                     rFlag = gsrch.has_next(response)
+                    if self.is_verbose():
+                        pp.p_debug("Extracting URLs.")
                     futil.dump_list(futil.join_names(dd, 'urls.txt'), \
                             gsrch.extract_urls(response))
 
