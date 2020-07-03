@@ -23,7 +23,7 @@
 ## example
 
      $ python3 f0x.py --update
-     $ python3 f0x.py --L
+     $ python3 f0x.py -L
      $ python3 f0x.py  -C 'Files_Containing_Juicy_Info'  -o /ghdb/juicyfiles  -T 60 -v
      $ python3 f0x.py  -S 9  -o /ghdb/juicyfiles  -T 60 -v
 
