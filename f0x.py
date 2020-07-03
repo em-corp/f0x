@@ -440,9 +440,6 @@ class Fox:
                         ua = self.get_ua()
                     else:
                         ua = UA.get_random_ua()
-                    if self.is_verbose():
-                        pp.p_debug("Using UA ==> {}".format(ua))
-                        pp.p_debug("Fetching URL ==> {}".format(url))
                         
                     response = gsrch.fetch(url, ua)
                     if self.is_verbose():
