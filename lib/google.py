@@ -2,16 +2,24 @@ __all__ = []
 
 import urllib.parse as urlparse
 import requests
+import re
 
 class GoogleSearch:
 
     def __qencode__(q):
         return urlparse.quote_plus(q)
 
-    def prepare_URL(query, site = '', params = '', page_num = 0, page_size = 30):
-        u = 'https://www.google.com/search?gbv=1&q='
-        if query == '':
+    def prepare_URL(query, site = '', params = '', page_num = 1, \
+            page_size = 30):
+        if not query or query == '':
             raise Exception("Query cannot be empty")
+        
+        if not site:
+            site = ''
+        if not params:
+            params = ''
+
+        u = 'https://www.google.com/search?gbv=1&q='
         u += GoogleSearch.__qencode__(query)
         if params != '':
             u += '+' + GoogleSearch.__qencode__(params)
@@ -29,10 +37,11 @@ class GoogleSearch:
             page_size = page_size * 10
         else:
             page_size = 30
-        
-        fmt = '{}&start={}&num={}'
 
+        fmt = '{}&start={}&num={}'
+        page_size = int(page_size)
         page_num = int(page_num)
+
         if page_num <= 1:
             return fmt.format(u, '', page_size)
         else:
@@ -70,7 +79,9 @@ class GoogleSearch:
                 re.M|re.I):
             if not re.search('^http(s)?://(www\.)?[^.]*\.google\.com', pat, \
                     re.I):
-                urls += [urlparse.unquote(pat)]
+                up = urlparse.unquote(pat)
+                if not up.startswith('/search?q='):
+                    urls += [up]
         return urls
 
 

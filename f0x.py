@@ -14,7 +14,7 @@ from lib.prettyPrint import Prettify as pp
 from lib.config import ConfigManager as conf
 from lib.utils import DirUtil as dutil
 from lib.utils import FileUtil as futil
-from lib.google import GoogleSearch as gs
+from lib.google import GoogleSearch as gsrch
 from lib.utils import Random as rand
 from lib.useragents import UA 
 
@@ -123,8 +123,8 @@ if not (args.site or \
 #------------------------------------------------------------------------------
 
 class Fox:
-    def __init__(self):
-        self.verbose = None
+    def __init__(self, verbose):
+        self.verbose = verbose
         self.site = None
         self.ex_q = None
         self.raw_q = None
@@ -141,6 +141,7 @@ class Fox:
         self.out_dir = None
         self.breport = None
         self.mr_achived = 0
+        self._load_conf()
 
     def set_site(self, site):
         self.site = site
@@ -256,11 +257,12 @@ class Fox:
         return self.verbose
 
     def _load_conf(self):
-        conf.load('f0x2.config')
+        conf.load('./f0x.config')
+        if self.is_verbose():
+            pp.p_debug("Loaded Config file, keys: {}".format(self.get_conf()\
+                    .getKeys()))
     
     def get_conf(self):
-        if conf.getConfig is None:
-            self._load_conf()
         return conf.getConfig()
 
     def get_dork_path(self):
@@ -335,7 +337,7 @@ class Fox:
         else:
             os.remove(f)
 
-        dutil.merge_dirs(tmpdir, self.get_dork_path)
+        dutil.merge_dirs(tmpdir, self.get_dork_path())
         pp.p_log("Dork Repo updated.")
 
     def get_severity_list(self):
@@ -386,7 +388,7 @@ class Fox:
         return dorks
    
     def _get_count(self):
-        self.mr_achived
+        return self.mr_achived
 
     def _set_count(self, c):
         self.mr_achived = c
@@ -431,7 +433,7 @@ class Fox:
 
                     time.sleep(t)
                     if self.is_verbose():
-                        pp.p_bebug("Processing now.")
+                        pp.p_debug("Processing now.")
                         pp.p_debug("#Page to fetch: {}".format(i))
 
                     if self.has_ua():
@@ -440,7 +442,8 @@ class Fox:
                         ua = UA.get_random_ua()
                     if self.is_verbose():
                         pp.p_debug("Using UA ==> {}".format(ua))
-
+                        pp.p_debug("Fetching URL ==> {}".format(url))
+                        
                     response = gsrch.fetch(url, ua)
                     if self.is_verbose():
                         pp.p_debug("Got Response.")
@@ -463,7 +466,7 @@ class Fox:
     def build_json(self):
         dorks = []
         try:
-            dorks = dutil.get_dir_list(self.get_dir(self.get_out_dir(), \
+            dorks = dutil.get_dir_list(dutil.get_dir(self.get_out_dir(), \
                 "dorks"), False)
         except:
             pp.p_log("No Dorks Found.")
@@ -509,13 +512,13 @@ class Fox:
                     }]
 
         try:
-            dorks = dutil.get_dir_list(self.get_dir(self.get_out_dir(), \
+            dorks = dutil.get_dir_list(dutil.get_dir(self.get_out_dir(), \
                 "dorks"), False)
         except:
             pp.p_log("No Dorks Found.")
             return
 
-        for f in dutil.get_dir_list(dorks, False):
+        for f in dorks:
             jf = ''
             try:
                 jf = futil.get_file(f, 'result.json')
@@ -525,10 +528,10 @@ class Fox:
                 jd = {}
                 with open(jf, 'r') as jfile:
                     jd = json.load(jfile)
-                
+               
                 data[int(jd['severity']) - 1]['lists'] += [{
                         'dork': jd['dork'],
-                        'path': re.sub('^{}'.format(self.get_out_dir()), \
+                        'path': re.sub('^{}(/)?'.format(self.get_out_dir()), \
                                 './', jf),
                         'count': len(jd['urls'])
                     }]
@@ -589,19 +592,21 @@ o888o    `8. o88'   888o .8'
                                 'URLs Retrived: </span><span class=' + \
                                 '"label-value resultCount">{}</span></p>'.\
                                 format(j['count']))
-                        fd.write('<p><span class="label resultLocLabel">' + \
+                        fd.write(('<p><span class="label resultLocLabel">' + \
                                 'JSON File: </span><span class=' + \
                                 '"label-value resultLoc"><a href="{}">{}' + \
-                                '</a></span></p>'.format(j['path'], j['path']))
+                                '</a></span></p>').format(j['path'], j['path']))
                         fd.write('<hr/>')
                     fd.write("</div>")
                 fd.write("</body></html>")
 
 #------------------------------------------------------------------------------
-fox = Fox()
+fox = None
 
 if args.verbose:
-    fox.set_verbose()
+    fox = Fox(verbose=True)
+else:
+    fox = Fox(verbose=False)
 
 if args.listrepo:
     fox.list_dorks_stats()
