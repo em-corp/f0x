@@ -38,7 +38,8 @@ def banner():
 parser = argparse.ArgumentParser()
 
 # input
-parser.add_argument('-d', '--domain', help='Specify Target domain.', dest='domain')
+parser.add_argument('-d', '--domain', help='Specify Target domain.', 
+                    dest='domain')
 
 parser.add_argument('-q', '--query', help='Specify query/dork manually, and' + 
                     ' don\'t use more dorks from dorks-db.', dest='query')
@@ -350,7 +351,9 @@ class F0x:
     def collect_open_proxies(self):
         proxies = asyncio.Queue()
         broker = Broker(proxies)
-        tasks = asyncio.gather(broker.find(types=['HTTP', 'HTTPS'], limit=self.get_open_proxy_count()), self._record_proxy(proxies))
+        tasks = asyncio.gather(broker.find(types=['HTTP', 'HTTPS'], 
+                                           limit=self.get_open_proxy_count()), 
+                                           self._record_proxy(proxies))
         
         loop = asyncio.get_event_loop()
         loop.run_until_complete(tasks)
@@ -540,7 +543,8 @@ class F0x:
                     if self._proxy_ptr == pl:
                         self._proxy_ptr = 0
                     
-                    if self._conn_per_proxy_count[self._proxy_ptr] < self.get_connection_per_proxy():
+                    if self._conn_per_proxy_count[self._proxy_ptr] < \
+                    self.get_connection_per_proxy():
                         p = self.get_proxy_list()[self._proxy_ptr]
                         self._conn_per_proxy_count[self._proxy_ptr] += 1
                         l = self._proxy_ptr
@@ -548,7 +552,8 @@ class F0x:
                     
                     if c >= pl:
                         c = 0
-                        time.sleep((self.get_delay_min() * self.get_no_of_pages()) / 4)
+                        time.sleep((self.get_delay_min() * 
+                                    self.get_no_of_pages()) / 4)
 
         if p:
             proxy = {'proxy': {'http': p, 'https': p}, 'loc': l}
@@ -816,7 +821,8 @@ if args.proxy_count:
     fox.set_open_proxy_count(args.proxy_count)
     
     if fox.is_verbose() and not args.proxy_open:
-        pp.p_info('Ignoring `open proxy count` as provided without enabling `open proxies` switch.')
+        pp.p_info('Ignoring `open proxy count` as provided without ' + 
+                  'enabling `open proxies` switch.')
         
 if args.proxy_open:
     fox.collect_open_proxies()
