@@ -15,16 +15,16 @@
 * Require python3
 
 ## usage
-     f0x.py [-h] [-s SITE] [-q QUERY] [-i] [-A EX_QUERY] [-C CATEGORY] [-S {1,2,3,4,5,6,7,8,9,10}] 
-     [--only] [--upper] [-a] [-Q] [-r PAGE_SIZE] [-t DORK_SIZE] [-T MAX_RESULTS] [-m MIN] [-M MAX] 
-     [-d DELAY] [-p PARALLEL] [-U UA] [-o OUTPUT] [-j] [-R] [--update] [-L] [-v]
+     $f0x.py [-h] [-d DOMAIN] [-q QUERY] [-n] [-Q EX_QUERY] [-c CATEGORY] [-cA] [-S SEVERITY] [-SQ] [-SA] [-t THREADS] [-p PROXY]
+     [-pF PROXY_FILE] [-pO] [-pC PROXY_COUNT] [-C PROXY_CONN] [--no-ssl-check] [--timeout TIME_OUT] [-m DELAY_MIN]
+     [-M DELAY_MAX] [-w DELAY] [-U UA] [--update] [-v] [-V] [-r PAGE_SIZE] [-R NO_OF_PAGES] [-T MAX_RESULTS] [-l] [-L]
+     [-o OUT_DIR] [-oJ] [-oL] [-oR]
 
 
 ## example
 
      $ python3 f0x.py --update
      $ python3 f0x.py -L
-     $ python3 f0x.py  -C 'Files_Containing_Juicy_Info'  -o /ghdb/juicyfiles  -T 60 -v
-     $ python3 f0x.py  -S 9  -o /ghdb/juicyfiles  -T 60 -v
+     $ python3 f0x.py --any --quality -v -p "http://10.10.10.10:4444" --no-ssl-check -t 3
 
 

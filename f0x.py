@@ -1,22 +1,28 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
-__NAME__    = "f0x.py"
-__VERSION__ = "1.0"
+__NAME__ = "f0x.py"
+__VERSION__ = "2.0"
 
 import argparse
 import re
 import os
 import time
 import json
+import threading
+import asyncio
+from proxybroker import Broker
+from concurrent.futures import ThreadPoolExecutor
 from git import Repo
+
 from lib.prettyPrint import Prettify as pp
 from lib.config import ConfigManager as conf
 from lib.utils import DirUtil as dutil
 from lib.utils import FileUtil as futil
 from lib.google import GoogleSearch as gsrch
 from lib.utils import Random as rand
-from lib.useragents import UA 
+from lib.useragents import UA
+
 
 def banner():
     print(pp.green('  .o88o.   .o             o.'))
@@ -26,256 +32,380 @@ def banner():
     print(pp.green('  888    88      ' + pp.yellow('Y888') + '       88'))
     print(pp.green('  888    `8.   ' + pp.yellow('.o8"\'88b') + '    .8\''))
     print(pp.green(' o888o    `8. ' + pp.yellow('o88\'   888o') + ' .8\''))
+    print()
+
 
 parser = argparse.ArgumentParser()
 
-parser.add_argument('-s', '--site', help='Specify Target site', dest='site')
+# input
+parser.add_argument('-d', '--domain', help='Specify Target domain.', dest='domain')
 
-parser.add_argument('-q', '--query', help='Dork to use. If specified, \
-        other files will not be read.', dest='query')
-parser.add_argument('-i', '--inclusive', help='This works with `query` option \
-        only, if used, will also read dorks from file. ', dest='inc', 
+parser.add_argument('-q', '--query', help='Specify query/dork manually, and' + 
+                    ' don\'t use more dorks from dorks-db.', dest='query')
+
+parser.add_argument('-n', '--no-stop', help='Works with `--query`, If ' + 
+                    'specified dorks from dorks-db will also be used along ' + 
+                    'with manually supplied dork.', dest='query_nostop',
+                    action="store_true")
+
+parser.add_argument('-Q', '--query-args', help='Specify extra query to ' + 
+                    'supply with each dorks.', dest='ex_query')
+
+# dork selection
+parser.add_argument('-c', '--category', help='Comma (,) separated dorks ' + 
+                    'categories to use.', dest='category')
+
+parser.add_argument('-cA', '--any', help='Use all available categories.',
+                    dest='cat_any', action="store_true")
+
+parser.add_argument('-S', '--severity', help='Comma (,) separated severity ' + 
+                    'range(from 1 to 10). eg. consider range expansion as : ' + 
+                    '"-4" will become "1,2,3,4", or ' + 
+                    '"2-5" will become "2,3,4,5", or ' + 
+                    '"7-" will become "7,8,9,10", or ' + 
+                    '"1-4,7" will become "1,2,3,4,7".', dest='severity')
+
+parser.add_argument('-SQ', '--quality', help='Only use quality dorks ' + 
+                    'i.e. with `severity >= 7`.', dest='sev_quality',
+                    action="store_true")
+
+parser.add_argument('-SA', '--all', help='Use all available severities.',
+                    dest='sev_all', action="store_true")
+
+# optimize fox
+parser.add_argument('-t', '--threads', help='Max parallel threads ' + 
+                    '(Default: 3).', type=int, dest='threads')
+
+parser.add_argument('-p', '--proxy', help="Specify proxy to use.", dest='proxy')
+
+parser.add_argument('-pF', '--proxy-file', help='Specify file to read proxies ' 
+                    +'list (one per line).', dest='proxy_file')
+
+parser.add_argument('-pO', '--open-proxies', help='Make use of open public ' + 
+                    'proxies.', dest='proxy_open', action='store_true')
+
+parser.add_argument('-pC', '--open-proxies-count', help='Try collecting ' + 
+                    '`n` open proxies. (Default: 20)', dest='proxy_count', 
+                    type=int)
+
+parser.add_argument('-C', '--conn', help='Max connections per proxy ' + 
+                    '(Default: 2).', dest='proxy_conn', type=int)
+
+parser.add_argument('--no-ssl-check', help='Disable certificate check.',
+                    dest='no_ssl_check', action='store_true')
+
+parser.add_argument('--timeout', help='Set request timeout.', dest='time_out',
+                    type=int)
+
+parser.add_argument('-m', '--min-delay', help='Specify minimum delay(sec) ' + 
+                    'between requests. (Default: `max-delay` - 3)s.',
+                    dest='delay_min', type=int)
+
+parser.add_argument('-M', '--max-delay', help='Specify maximum delay(sec) ' + 
+                    'between requests. (Default: `min-delay` + 3)s.',
+                    dest='delay_max', type=int)
+
+parser.add_argument('-w', '--wait', help='Specify fix delay(sec) between ' + 
+                    'requests (Default: 1s).', dest='delay', type=int)
+
+parser.add_argument('-U', '--user-agent', help='Specify User Agent.', dest='ua')
+
+parser.add_argument('--update', help='Update dorks repo and exit.',
+                    dest='repo_update', action="store_true")
+
+parser.add_argument('-v', '--verbose', help='Be verbose.', dest='verbose',
         action="store_true")
-parser.add_argument('-A', '--args', help='Specify extra query to supply with \
-        each dorks.', dest='ex_query')
 
-parser.add_argument('-C', '--category', help='Use dorks from this category \
-        only.', dest='category')
-parser.add_argument('-S', '--severity', help='Specify minimum severity\
-        (inclusive) dork file to read, range is [0, 10], defalut: 5.', 
-        dest='severity', type=int, choices=range(1, 11))
-parser.add_argument( '--only', help='Use along with severity, to \
-        select only a particular value.', dest='s_only', action='store_true')
-parser.add_argument( '--upper', help='Use along with severity, to mark \
-        provided value as upper limit (exclusive).', dest='s_upper', 
-        action='store_true')
-parser.add_argument('-a', '--all', help='Use all the dork files to fetch \
-        result (overrides --only, --upper flags).', dest='s_all', 
-        action='store_true')
-parser.add_argument('-Q', '--quality', help='Use only top severity(>=8) dork \
-        files (overrides --only, --upper flags). ', dest='s_qual', 
-        action='store_true')
+parser.add_argument('-V', '--version', help='Display version info and exit.',
+                    dest='version', action="store_true")
 
-parser.add_argument('-r', '--results', help='Total results to fetch in one \
-        request, default is 30.', dest='page_size', type=int)
-parser.add_argument('-t', '--total', help='Total results to fetch for each \
-        dork, default is 150.', dest='dork_size', type=int)
-parser.add_argument('-T', '--max', help='Maximum results to fetch for all the \
-        dorks combined.', dest='max_results', type=int)
+parser.add_argument('-r', '--results', help='Dork results to fetch in one ' + 
+                    'page request (Default: 30).', dest='page_size', type=int)
 
-#parser.add_argument('-P', '--proxy', help='proxy', dest='')
-#parser.add_argument('-f', '--proxy-file', help='list of proxies', dest='')
-#parser.add_argument('-c', '--conn', help='connections per proxy', dest='')
+parser.add_argument('-R', '--requests', help='Pages to request for each ' + 
+                    'dork (Default: 5).', dest='no_of_pages', type=int)
 
-parser.add_argument('-m', '--mintime', help='Specify minimum sec to wait \
-        between requests, If not specified, default 5 sec range is assumed', 
-        dest='min', type=int)
-parser.add_argument('-M', '--maxtime', help='Specify maximum sec to wait \
-        between requests, if not specified, default 5 sec range is assumed.', 
-        dest='max', type=int)
-parser.add_argument('-d', '--delay', help='Specify fix delay(in sec), if \
-        specified, took priority over variable delay.', dest='delay', type=int)
-parser.add_argument('-p', '--parallel', help='Specify total no of parallel \
-        requests, default is 5.', dest='parallel', type=int)
-parser.add_argument('-U', '--user-agent', help='Specify User Agent ', 
-        dest='UA')
+parser.add_argument('-T', '--max-results', help='Maximum results to fetch ' + 
+                    'for all the dorks combined.', dest='max_results', type=int)
 
-parser.add_argument('-o', '--output', help='Specify output directory', 
-        dest='output')
-parser.add_argument('-j', '--json', help='Save output in JSON format only', 
-        dest='json', action="store_true")
-parser.add_argument('-R', '--report', help='Create Report along with JSON \
-        format ouput, default', dest='report', action="store_true")
+# output filters
+parser.add_argument('-l', '--list-dorks', help='List all dorks to be used ' + 
+                    'and exit. Specify `category` or `severity` to narrow ' + 
+                    'down the list. ', dest='list_dorks', action="store_true")
 
-parser.add_argument('--update', help='Update Dorks Repo, and exit', 
-        dest='updaterepo', action="store_true")
-parser.add_argument('-L', '--list', help='List Repo categories, total \
-        dorks and exit', dest='listrepo', action="store_true")
-parser.add_argument('-v', '--verbose', help='Be verbose.', dest='verbose', 
-        action="store_true")
+parser.add_argument('-L', '--categories', help='List available categories ' + 
+                    'and exit.', dest='list_cat', action="store_true")
+
+parser.add_argument('-o', '--outdir', help='Specify output directory.',
+                    dest='out_dir')
+
+parser.add_argument('-oJ', '--out-json', help='Save output in JSON format.',
+                    dest='out_fmt_json', action="store_true")
+
+parser.add_argument('-oL', '--out-list', help='Save output in simple list.',
+                    dest='out_fmt_list', action="store_true")
+
+parser.add_argument('-oR', '--out-report', help='Create html report with ' + 
+                    'JSON format results.', dest='out_report',
+                    action="store_true")
 
 args = parser.parse_args()
 
+if args.version:
+    print("{} v{}".format(pp.as_bold(pp.red(__NAME__)), pp.blue(__VERSION__)))
+    quit()
+    
 banner()
-print("\t{} v{}".format(pp.as_bold(pp.red(__NAME__)), pp.blue(__VERSION__)))
 
-if not (args.site or \
-        args.query or \
-        args.category or \
-        args.severity or \
-        args.s_all or \
-        args.s_qual  or \
-        args.page_size or \
-        args.dork_size or \
-        args.max_results or \
-        args.min or \
-        args.max or \
-        args.delay or \
-        args.parallel or \
-        args.UA or \
-        args.output or \
-        args.updaterepo or \
-        args.listrepo):
-            pp.p_error('No options are specified.')
-            print (parser.format_help())
-            quit()
 
-#------------------------------------------------------------------------------
+class F0x:
 
-class Fox:
-    def __init__(self, verbose):
+    def __init__(self, verbose=False):
         self.verbose = verbose
-        self.site = None
-        self.ex_q = None
-        self.raw_q = None
-        self.inc = None
-        self.cat = None
-        self.sev = None
-        self.sev_flag = None
-        self.psize = None
-        self.dsize = None
-        self.max_res = None
-        self.del_range = [None, None]
-        self.par = None
-        self.UA = None
-        self.out_dir = None
-        self.breport = None
-        self.mr_achived = 0
+        self.severities = None
+        self.categories = None
+        self.domain = None
+        self.query = None
+        self.ex_args = None
+        self.process_dorksdb_flag = True
+        self.useragent = None
+        self.threads = 3
+        self.delay_min = 1
+        self.delay_max = 1
+        self.connection_per_proxy = 2
+        self.proxies_list = None
+        self._conn_per_proxy_count = None
+        self._proxy_ptr = -1
+        self.request_timeout = None
+        self.ssl_check = True
+        self.open_proxy_count = 20
+        self.page_size = gsrch.correct_page_size(30)
+        self.no_of_pages = 5
+        self.max_results = None
+        self.outdir = None
+        self.outmode = None
+        self.results_count = 0
+        
+        self._proxy_lock = threading.Lock()
+        self._count_lock = threading.Lock()
+        
         self._load_conf()
-
-    def set_site(self, site):
-        self.site = site
-
-    def get_site(self):
-        return self.site
-
-    def set_ex_query(self, q):
-       self.ex_q = q
-
-    def get_ex_query(self):
-        return self.ex_q
-
-    def set_raw_query(self, q):
-        self.raw_q = q
-
-    def get_raw_query(self):
-        return self.raw_q
-
-    def set_inc_q(self):
-        self.inc = True
-    
-    def unset_inc_q(self):
-        self.inc = False
-
-    def get_inc_q(self):
-        return self.inc
-
-    def set_category(self, c):
-        self.cat = c
-
-    def get_category(self):
-        return self.cat
-
-    def set_severity(self, s):
-        self.sev = s
-
-    def get_severity(self):
-        return self.sev
-
-    def set_severity_flag(self, sf):
-        self.sev_flag = sf
-
-    def get_severity_flag(self):
-        return self.sev_flag
-
-    def set_page_size(self, ps):
-        self.psize = ps
-
-    def get_page_size(self):
-        return self.psize
-
-    def set_dork_size(self, ds):
-        self.dsize = ds
-
-    def get_dork_size(self):
-        return self.dsize
-    
-    def set_max_results(self, mr):
-        self.max_res = mr
-
-    def get_max_results(self):
-        return self.max_res
-
-    def set_delay_range(self, s, e):
-        self.del_range = [s, e]
-
-    def get_delay_range(self):
-        return self.del_range
-
-    def get_delay_start(self):
-        return self.get_delay_range()[0]
-
-    def get_delay_end(self):
-        return self.get_delay_range()[1]
-
-    def set_max_parallel(self, p):
-        self.par = p
-
-    def get_max_parallel(self):
-        return self.par
-
-    def set_ua(self, ua):
-        self.UA = ua
-
-    def get_ua(self):
-        return self.UA
-
-    def has_ua(self):
-        if self.UA and not (self.UA == ''):
-            return True
-        return False
-
-    def set_out_dir(self, d):
-        self.out_dir = d
-
-    def get_out_dir(self):
-        return self.out_dir
-
-    def set_build_report(self):
-        self.breport = True
-
-    def unset_build_report(self):
-        self.breport = False
-
-    def get_build_report(self):
-        return self.breport
-
-    def set_verbose(self):
-        self.verbose = True
-
-    def is_verbose(self):
-        return self.verbose
 
     def _load_conf(self):
         conf.load('./f0x.config')
         if self.is_verbose():
-            pp.p_debug("Loaded Config file, keys: {}".format(self.get_conf()\
-                    .getKeys()))
+            pp.p_debug("Loaded Config file, keys: {}"
+                       .format(self.get_conf().getKeys()))
     
     def get_conf(self):
         return conf.getConfig()
 
+    def is_verbose(self):
+        return self.verbose
+    
+    def set_categories(self, categories=None):
+        self.categories = categories
+  
+    def get_categories(self):
+        return self.categories
+    
+    def set_severities(self, severities=None):
+        self.severities = severities
+        
+    def get_severities(self):
+        return self.severities
+    
+    def set_domain(self, domain):
+        self.domain = domain
+    
+    def get_domain(self):
+        return self.domain
+    
+    def set_query(self, query):
+        self.query = query
+    
+    def get_query(self):
+        return self.query
+        
+    def set_ex_args(self, ex_args):
+        self.ex_args = ex_args
+    
+    def get_ex_args(self):
+        return self.ex_args
+        
+    def set_useragent(self, useragent):
+        self.useragent = useragent
+        
+    def get_useragent(self):
+        return self.useragent
+    
+    def set_process_dorksdb_flag(self, flag):
+        self.process_dorksdb_flag = flag
+        
+    def get_process_dorksdb_flag(self):
+        return self.process_dorksdb_flag
+    
+    def set_threads(self, threads):
+        self.threads = threads
+        
+    def get_threads(self):
+        return self.threads
+    
+    def set_delay_min(self, delay_min):
+        self.delay_min = delay_min
+        
+    def get_delay_min(self):
+        return self.delay_min
+    
+    def set_delay_max(self, delay_max):
+        self.delay_max = delay_max
+        
+    def get_delay_max(self):
+        return self.delay_max
+    
+    def set_connection_per_proxy(self, conn):
+        self.connection_per_proxy = conn
+    
+    def get_connection_per_proxy(self):
+        return self.connection_per_proxy
+    
+    def add_proxy(self, proxy):
+        if not self.proxies_list:
+            self.proxies_list = []
+            self._conn_per_proxy_count = []
+            
+        self.proxies_list += [proxy]
+        self._conn_per_proxy_count += [0]
+    
+    def get_proxy_list(self):
+        return self.proxies_list
+    
+    def set_page_size(self, page_size):
+        self.page_size = page_size
+        
+    def get_page_size(self):
+        return self.page_size
+    
+    def set_no_of_pages(self, no_of_pages):
+        self.no_of_pages = no_of_pages
+        
+    def get_no_of_pages(self):
+        return self.no_of_pages
+    
+    def set_max_results(self, max_results):
+        self.max_results = max_results
+        
+    def get_max_results(self):
+        return self.max_results
+    
+    def set_outdir(self, outdir):
+        self.outdir = outdir
+    
+    def get_outdir(self):
+        return self.outdir
+    
+    def set_outmode(self, omode):
+        self.outmode = omode
+    
+    def get_outmode(self):
+        return self.outmode
+    
+    def set_results_count(self, count):
+        self.results_count = count
+    
+    def get_results_count(self):
+        return self.results_count
+    
+    def set_request_timeout(self, timeout):
+        self.request_timeout = timeout
+    
+    def get_request_timeout(self):
+        return self.request_timeout
+    
+    def set_ssl_check(self, ssl_check):
+        self.ssl_check = ssl_check
+        
+    def do_ssl_check(self):
+        return self.ssl_check
+
+    def set_open_proxy_count(self, count):
+        self.open_proxy_count = count
+    
+    def get_open_proxy_count(self):
+        return self.open_proxy_count
+        
+    async def _record_proxy(self, proxies):
+        while True:
+            proxy = await proxies.get()
+            if proxy is None:
+                break
+            
+            proto = 'https' if 'HTTPS' in proxy.types else 'http'
+            proxy_url = '%s://%s:%d' % (proto, proxy.host, proxy.port)
+            self.add_proxy(proxy_url)
+            
+            if fox.is_verbose():
+                pp.p_log("Found proxy: {}".format(pp.light_green(proxy_url)))
+    
+    def collect_open_proxies(self):
+        proxies = asyncio.Queue()
+        broker = Broker(proxies)
+        tasks = asyncio.gather(broker.find(types=['HTTP', 'HTTPS'], limit=self.get_open_proxy_count()), self._record_proxy(proxies))
+        
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(tasks)
+    
+    def update_dorks_repo(self):
+        pp.p_log("Building Dork Repo.")
+        repo_url = self.get_conf().get('repo_url')
+        pp.p_log("Fetching from '{}'".format(repo_url))
+
+        tmpdir = dutil.create_temp_dir('f0x', 'repo_')
+        Repo.clone_from(repo_url, tmpdir)
+        pp.p_log("Done Fetching.")
+
+        rmdirs = ['.git']
+        rmfiles = ['README.md', 'LICENSE']
+
+        for i in rmdirs:
+            try:
+                g = dutil.get_dir(tmpdir, i)
+            except:
+                pass
+            else:
+                dutil.rmdir(g)
+                
+        for i in rmfiles:
+            try:
+                f = futil.get_file(tmpdir, i)
+            except:
+                pass
+            else:
+                os.remove(f)
+        try:
+            dutil.merge_dirs(tmpdir, self.get_dork_path())
+        except Exception as e:
+            pp.p_error(e)
+            quit()
+
+        pp.p_log("Dork Repo updated.")
+    
     def get_dork_path(self):
         dp = ''
+        flag = False
+
         try:
             dp = self.get_conf().get('dork_path')
         except:
-            pp.p_error("Dorks path not exists, Check config file.")
-            return
+            pp.p_error("Dorks path not exists.")
+            flag = True
         else:
             if dp == '':
-                pp.p_error("Dorks path not defined, Check config file.")
-                return
+                pp.p_error("Dorks path not defined.")
+                flag = True
+        
+        if flag:
+            raise Exception("Error in Config file.")
 
         if dp.startswith('~'):
             dp = os.path.expanduser(dp)
@@ -289,495 +419,407 @@ class Fox:
             dp = dutil.join_names(cwd, dp)
 
         return dp
-
-    def list_dorks_stats(self):
-        dp = self.get_dork_path()
-        if dp is None or dp == '':
-            pp.p_error("Dorks path not defined, Check config file.")
-            return
+        
+    def list_repo_categories(self):
+        dp = None
+        try:
+            dp = self.get_dork_path()
+        except Exception as e:
+            pp.p_error(e)
+            quit()
 
         dl = dutil.get_dir_list(dp, True)
         if len(dl) == 0:
             pp.p_log("No Dorks available, Update dork repo.")
+            return
 
-        for i in dl: 
+        for i in dl:
             dc = re.sub('^{}[/]?'.format(dp), '', i)
             dc = re.sub('/', '.', dc)
-            td = len (dutil.get_files_list(i, True))
+            td = len(dutil.get_files_list(i, True))
             pp.p_log("Category: {}".format(dc))
             pp.p_log("Total Dorks: {}\n".format(td), '**')
-
-    def update_dorks_repo(self):
-        pp.p_log("Building Dork Repo.")
-        repo_url = self.get_conf().get('repo_url')
-        pp.p_log("Fetching from '{}'".format(repo_url))
     
-        tmpdir = dutil.create_temp_dir('f0x', 'repo_')
-        Repo.clone_from(repo_url, tmpdir)
-        pp.p_log("Done Fetching.")
-
-        try:
-            g = dutil.get_dir(tmpdir, '.git')
-        except:
-            pass
+    def list_dorks(self):
+        cat = None
+        sev = None
+        
+        if self.get_categories():
+            cat = self.get_categories()
         else:
-            dutil.rmdir(g)
-
-        try:
-            f = futil.get_file(tmpdir, 'README.md')
-        except:
-            pass
+            cat = [""]
+            
+        if self.get_severities():
+            sev = self.get_severities()
         else:
-            os.remove(f)
+            sev = range(1, 11)
+        
+        for c in cat:
+            for d in self.get_dorks(c, sev):
+                pp.p_log(d)
+    
+    def get_dorks(self, category, sev_list):
+        dorks = []
+        dpath = None
+        chome = ''
+        
+        if not sev_list or len(sev_list) == 0:
+            return dorks
         
         try:
-            f = futil.get_file(tmpdir, 'LICENSE')
-        except:
-            pass
-        else:
-            os.remove(f)
+            dpath = self.get_dork_path()
+        except Exception as e:
+            pp.p_error(e)
+            return []
+        
+        if category:
+            chome = re.sub('\.', '/', category)
 
-        dutil.merge_dirs(tmpdir, self.get_dork_path())
-        pp.p_log("Dork Repo updated.")
-
-    def get_severity_list(self):
-        sev = []
-        s = self.get_severity()
-        s_f = self.get_severity_flag()
-
-        if s_f == 0:
-            sev = list(range(s, 11))
-        elif s_f  == 1:
-            sev = [s]
-        elif s_f  == 2:
-            sev = list(range(1, s)) #if severity = 1, return empty set
-
-        return sev
-
-    def get_dorks(self, svr):
-        dorks = []
-        if self.get_raw_query():
-            if svr == 10:
-                dorks += [self.get_raw_query()]
-            if not self.get_inc_q():
-                return dorks
-    
-        dpath = self.get_dork_path()
-        chome = ''
-
-        if self.get_category() and self.get_category() != '':
-            chome = re.sub('\.', '/', self.get_category())
-   
         dpath = dutil.get_dir(dpath, chome)
 
         for i in dutil.get_files_list(dpath, True):
             with open (i, 'r') as dfile:
-                d = ''
-                j = ''
+                d = None
+                j = None
                 for l in dfile:
-                    if l.lstrip().lower().startswith('dork:'):
-                        d = re.sub('^[dD][oO][rR][kK]:', '', l.lstrip())
+                    if l.lstrip().lower().startswith('googledork:'):
+                        d = re.sub('^googledork:', '', l.lstrip().lower())
                         d = d.strip()
                     elif l.lstrip().lower().startswith('severity:'):
                         j = re.sub('^severity:', '', l.lstrip().lower())
                         j = j.strip()
-            
-                if int(j) == svr:
+                    elif (not d) and l.lstrip().lower().startswith('dork:'):
+                        d = re.sub('^dork:', '', l.lstrip().lower())
+                        d = d.strip()
+                    
+                if j and int(j) in sev_list and d:
                     dorks.append(d)
 
         return dorks
-   
-    def _get_count(self):
-        return self.mr_achived
-
-    def _set_count(self, c):
-        self.mr_achived = c
-
-    def _update_results_count(self, c):
-        self._set_count(self._get_count() + c)
-
-    def _can_fetch_more(self):
-        return (self.get_max_results() - self._get_count()) > 0
-
-    def persist(self, r, d, s, o, fc):
-        if fc == 1:
-            fd = open(futil.join_names(o, 'dork.info'), 'w')
-            fd.write("dork: {}\n".format(d))
-            fd.write("severity: {}\n".format(s))
-            fd.close()
-        fd = open(futil.join_names(o, 'dork_page_' + str(fc)), 'w')
-        fd.write(r)
-        fd.close()
-
-    def process_dork(self, d, s):
-        if not self._can_fetch_more():
-            return
-
-        i = 0
-        rFlag = True
-        dd = dutil.create_random_dir(dutil.create_dir(self.get_out_dir(), \
-                'dorks'), 'dork_')
-        pp.p_log("Processing dork: {}".format(d))
-
-        while rFlag and self._can_fetch_more() and \
-                ((self.get_page_size() * i) <= self.get_dork_size()):
-                    i += 1
-                    pp.p_log("Page request: {}".format(i))
-                    url = gsrch.prepare_URL(d, self.get_site(), \
-                            self.get_ex_query(), i, self.get_page_size())
-                    t = rand.rand_between(self.get_delay_start(), \
-                            self.get_delay_end())
-
-                    if self.is_verbose():
-                        pp.p_debug("Sleeping for {} sec.".format(t))
-
-                    time.sleep(t)
-                    if self.is_verbose():
-                        pp.p_debug("Processing now.")
-                        pp.p_debug("#Page to fetch: {}".format(i))
-
-                    if self.has_ua():
-                        ua = self.get_ua()
-                    else:
-                        ua = UA.get_random_ua()
-                        
-                    response = gsrch.fetch(url, ua)
-                    if self.is_verbose():
-                        pp.p_debug("Got Response.")
-
-                    if self.is_verbose():
-                        pp.p_debug("Saving Response.")
-                    self.persist(response, d, s, dd, i)
-                    self._update_results_count(self.get_page_size())
-                    rFlag = gsrch.has_next(response)
-                    if self.is_verbose():
-                        pp.p_debug("Extracting URLs.")
-                    futil.dump_list(futil.join_names(dd, 'urls.txt'), \
-                            gsrch.extract_urls(response))
-
-    def build_db(self):
-        for s in self.get_severity_list():
-            for d in self.get_dorks(s):
-                self.process_dork(d, s)
-
-    def build_json(self):
-        dorks = []
-        try:
-            dorks = dutil.get_dir_list(dutil.get_dir(self.get_out_dir(), \
-                "dorks"), False)
-        except:
-            pp.p_log("No Dorks Found.")
-            return
-
-        for i in dorks:
-            try:
-                futil.get_file(i, 'urls.txt')
-            except:
-                continue
-            else:
-                l = []
-                s = ''
-                d = ''
-
-                with open(futil.get_file(i, 'urls.txt'), 'r') as urls:
-                    for u in urls:
-                        l += [u.strip('\n')]
-
-                with open(futil.get_file(i, 'dork.info'), 'r') as infos:
-                    for line in infos:
-                        if line.startswith('dork: '):
-                            d = re.sub('dork: ', '', line)
-                            d = d.strip('\n')
-                        elif line.startswith('severity: '):
-                            s = re.sub('severity: ', '', line)
-                            s = s.strip('\n')
-
-                with open(futil.join_names(i, 'result.json'), 'w') as fd:
-                    data = {
-                            'severity' : s,
-                            'dork' : d,
-                            'urls' : l
-                            }
-                    fd.write(json.dumps(data))
+    
+    def fetch_page_response(self, dork, pagenum, proxy):
+        gurl = gsrch.prepare_URL(dork, self.get_domain(), self.get_query(),
+                                 pagenum, self.get_page_size())
         
-    def get_report_obj(self):
-        data = []
-        for i in range(1, 11):
-            data += [{
-                    'severity': i,
-                    'lists': []
-                    }]
+        ua = None
+        if self.get_useragent():
+            ua = self.get_useragent()
+        else:
+            ua = UA.get_random_ua()
+        
+        return gsrch.fetch(gurl, ua, proxy, self.get_request_timeout(), 
+                           self.do_ssl_check())
+        
+    def save_links(self, links_list):  # FIXME: output
+        for l in links_list:
+            pp.p_log(l)
+    
+    def update_results_stats(self, c):
+        with self._count_lock:
+            self.set_results_count(self.get_results_count() + c)
+    
+    def can_fetch_more(self):
+        if self.get_max_results():
+            return self.get_results_count() < self.get_max_results()
 
+        return True
+    
+    def get_proxy_object(self):
+        proxy = {'proxy': None, 'loc': None}
+        p = None
+        l = None
+        
+        if self.get_proxy_list():
+            pl = len(self.get_proxy_list())
+            c = 0
+            
+            with self._proxy_lock:
+                while True:
+                    c += 1
+                    self._proxy_ptr += 1
+                    if self._proxy_ptr == pl:
+                        self._proxy_ptr = 0
+                    
+                    if self._conn_per_proxy_count[self._proxy_ptr] < self.get_connection_per_proxy():
+                        p = self.get_proxy_list()[self._proxy_ptr]
+                        self._conn_per_proxy_count[self._proxy_ptr] += 1
+                        l = self._proxy_ptr
+                        break
+                    
+                    if c >= pl:
+                        c = 0
+                        time.sleep((self.get_delay_min() * self.get_no_of_pages()) / 4)
+
+        if p:
+            proxy = {'proxy': {'http': p, 'https': p}, 'loc': l}
+        return proxy
+    
+    def release_proxy(self, proxyobj):
+        l = proxyobj['loc']
         try:
-            dorks = dutil.get_dir_list(dutil.get_dir(self.get_out_dir(), \
-                "dorks"), False)
+            if (l or int(l) == 0) and self._conn_per_proxy_count[l] != 0:
+                self._conn_per_proxy_count[l] -= 1
         except:
-            pp.p_log("No Dorks Found.")
-            return
+            pass
+    
+    def process_dork(self, dork):
+        if self.is_verbose():
+            pp.p_debug("Processing dork: {}".format(dork))
+        
+        proxy = self.get_proxy_object()
 
-        for f in dorks:
-            jf = ''
+        for p in range(1, self.get_no_of_pages() + 1):
+            if not self.can_fetch_more():
+                break
+            
+            time.sleep(rand.rand_between(self.get_delay_min(),
+                                         self.get_delay_max()))
+            response = None
             try:
-                jf = futil.get_file(f, 'result.json')
-            except:
-                continue
-            else:
-                jd = {}
-                with open(jf, 'r') as jfile:
-                    jd = json.load(jfile)
-               
-                data[int(jd['severity']) - 1]['lists'] += [{
-                        'dork': jd['dork'],
-                        'path': re.sub('^{}(/)?'.format(self.get_out_dir()), \
-                                './', jf),
-                        'count': len(jd['urls'])
-                    }]
-        return data
+                response = self.fetch_page_response(dork, p, proxy['proxy'])
+            except Exception as e:
+                gsrch.session_cleanup()
+                pp.p_error(e)
+                return
 
-    def build_report(self):
-        with open(futil.join_names(fox.get_out_dir(), 'report.html'), 'w') \
-                as fd:
-                banner = '''<div class="banner"><pre>
-.o88o.   .o             o.
- 888 `"  .8'             `8.
-o888oo  .8'  oooo    ooo  `8.
- 888    88    `88b..8P'    88
- 888    88      Y888'      88
- 888    `8.   .o8"'88b    .8'
-o888o    `8. o88'   888o .8'
-</pre></div>
-<span class="banner-footer">Report Generated by `<b>f0x</b>`</span>
-'''
-                do = self.get_report_obj()
-                css = '''
-                .banner{
-                    font-weight: 600;
-                }
+            if self.is_verbose():
+                pp.p_debug("Fetched page : {}".format(p))
+                
+            links = gsrch.extract_urls(response)
+            if self.is_verbose():
+                pp.p_debug("Found {} url(s).".format(len(links)))
+            
+            self.save_links(links)
+            
+            self.update_results_stats(len(links))
+            
+            if not gsrch.has_next(response):
+                break
+            
+        self.release_proxy(proxy)
+        gsrch.session_cleanup()
     
-                .banner-footer {
-                    font-style: italic;
-                }
-    
-                .severity {
-                    font-size: 2.4em;
-                }
+    def execute(self):
+        dorks = []
+        if self.get_query():
+            dorks += [self.get_query()]
+        
+        if self.get_process_dorksdb_flag():
+            cat = []
+            if self.get_categories():
+                cat = self.get_categories()
+            
+            for c in cat:
+                dorks += self.get_dorks(c, self.get_severities())
+        
+        if self.is_verbose():
+            pp.p_debug("{} dorks to fetch.".format(len(dorks)))
+        
+        with ThreadPoolExecutor(max_workers=self.get_threads()) as exec:
+            exec.map(self.process_dork, dorks)
 
-                .label {
-                    font-size: 1.4em;
-                }
-    
-                .label-value {
-                    font-style: italic;
-                    font-weight: 600;
-                }
-                '''
+                
+fox = F0x(verbose=args.verbose)
 
-                fd.write("<html><head><title>OSINT Report - [GHDB]</title>" + \
-                        "<style>{}</style></head><body>".format(css))
-                fd.write(banner)
-
-                for i in do:
-                    fd.write('<div><p><span class="severity severity-{}">' + \
-                            'Severity {}</span></p>'.format(i['severity'], \
-                            i['severity']))
-                    for j in i['lists']:
-                        fd.write('<p><span class="label dorkLabel">' + \
-                                'Dork Used: </span> <span class=' + \
-                                '"label-value dork">{}</span></p>'.format(\
-                                j['dork']))
-                        fd.write('<p><span class="label resultCountLabel">' + \
-                                'URLs Retrived: </span><span class=' + \
-                                '"label-value resultCount">{}</span></p>'.\
-                                format(j['count']))
-                        fd.write(('<p><span class="label resultLocLabel">' + \
-                                'JSON File: </span><span class=' + \
-                                '"label-value resultLoc"><a href="{}">{}' + \
-                                '</a></span></p>').format(j['path'], j['path']))
-                        fd.write('<hr/>')
-                    fd.write("</div>")
-                fd.write("</body></html>")
-
-#------------------------------------------------------------------------------
-fox = None
-
-if args.verbose:
-    fox = Fox(verbose=True)
-else:
-    fox = Fox(verbose=False)
-
-if args.listrepo:
-    fox.list_dorks_stats()
-    quit()
-
-if args.updaterepo:
+if args.repo_update:
     fox.update_dorks_repo()
     quit()
 
-if args.site:
-    site = ''
-    site = args.site.strip()
-    site = re.sub(r'^http(s)?://(www\.)?', '', site)
-    site = re.sub('/.*(/)?', '', site)
-
-    fox.set_site(site)
-
-    if fox.is_verbose():
-        pp.p_debug("Using target ==> {}".format(fox.get_site()))
-
-if args.ex_query:
-    fox.set_ex_query(args.ex_query.strip())
-
-    if fox.is_verbose():
-        pp.p_debug("Using extra query parameters ==> {}".format(fox.\
-                get_ex_query()))
-
-if args.query:
-    fox.set_raw_query(args.query.strip())
-
-    if fox.is_verbose():
-        pp.p_debug("Using query ==> {}".format(fox.get_raw_query()))
-
-if args.inc:
-    if not args.query:
-        pp.p_error("Query not found, but inclusive switch is on")
-        quit()
-
-    fox.set_inc_q()
-    if fox.is_verbose():
-        pp.p_debug("Including dorks results along with query results")
-
-if args.category:
-    fox.set_category(args.category.strip())
-
-    if fox.is_verbose():
-        pp.p_debug("Using category ==> {}".format(fox.get_category()))
-
-fox.set_severity(5)
-fox.set_severity_flag(0)
-
-if args.severity:
-    fox.set_severity(args.severity)
-
-# 0 for >= severity
-# 1 for = severity
-# 2 for < severity
-if args.s_only:
-    fox.set_severity_flag(1)
-if args.s_upper:
-    fox.set_severity_flag(2)
-
-if args.s_all:
-    fox.set_severity(0)
-    fox.set_severity_flag(0)
-
-if fox.is_verbose() and args.s_all:
-    if args.severity:
-        pp.p_debug("Severity is overridden by `--all` switch")
-    
-if args.s_qual:
-    fox.set_severity(8)
-    fox.set_severity_flag(0)
-
-if fox.is_verbose() and args.s_qual:
-    if args.severity or args.s_all:
-        pp.p_debug("Severity is overridden by `--quality` switch")
-
-if fox.is_verbose():
-    s_m = ''
-    if fox.get_severity_flag() == 0:
-        s_m = 'min'
-    elif fox.get_severity_flag() == 1:
-        s_m = 'only'
-    elif fox.get_severity_flag() == 2:
-        s_m = 'max'
-    pp.p_debug("Using severity ==> {}".format(fox.get_severity()))
-    pp.p_debug("Using Severity as ==> {}".format(s_m))
-
-fox.set_page_size(30)
-if args.page_size:
-    fox.set_page_size(args.page_size)
-
-if fox.is_verbose():
-    pp.p_debug("Using page size ==> {}".format(fox.get_page_size()))
-
-fox.set_dork_size(150)
-if args.dork_size:
-    fox.set_dork_size(args.dork_size)
-
-if fox.is_verbose():
-    pp.p_debug("Max results per dork ==> {}".format(fox.get_dork_size()))
-
-# defaults to 100 dorks 
-fox.set_max_results(fox.get_dork_size() * 100)
-if args.max_results and args.max_results >= 0:
-    fox.set_max_results(args.max_results)
-
-if fox.is_verbose():
-    pp.p_debug("Total results limit to ==> {}".format(fox.get_max_results()))
-
-s_delay = 2
-e_delay = 7
-if args.delay and args.delay >= 0:
-    s_delay = e_delay = args.delay
-else:
-    if args.min and args.max:
-        s_delay = args.min
-        e_delay = args.max
-    elif args.min:
-        s_delay = args.min
-        e_delay = s_delay + 5
-    elif args.max:
-        e_delay = args.max
-        s_delay = 0
-        if e_delay - 5 > 0:
-            s_delay = e_delay - 5
-
-fox.set_delay_range(s_delay, e_delay)
-if fox.is_verbose(): 
-    pp.p_debug("Using delay range ==> [{}, {}] sec".format\
-            (fox.get_delay_start(), fox.get_delay_end()))
-
-fox.set_max_parallel(5)
-if args.parallel and args.parallel > 0:
-    fox.set_max_parallel(args.parallel)
-
-if fox.is_verbose():
-    pp.p_debug("Using parallel requests ==> {}".format(\
-            fox.get_max_parallel()))
-
-if args.UA:
-    fox.set_ua(args.UA.strip())
-
-if fox.is_verbose() and fox.has_ua():
-    pp.p_debug("Using User-Agent ==> {}".format(fox.get_ua()))
-
-if args.output:
-    fox.set_out_dir(dutil.create_dir(args.output.strip()))
-else:
-    pp.p_error("Output directory is not specified")
+if args.list_cat:
+    fox.list_repo_categories()
     quit()
 
-fox.set_build_report()
-if args.json and not args.report:
-    fox.unset_build_report()
+flag_dork_selector = False
+    
+if args.severity:
+    flag_dork_selector = True
+    s = []
+    l = "1"
+    m = "10"
+    
+    if re.search("[^0-9,-]", args.severity):
+        pp.p_error("Severity value can only contains numbers or numeral " + 
+                   "range, separated by comma (,).")
+        quit()
+    
+    for i in args.severity.split(','):
+        j = i
+        if i.startswith('-'):
+            j = l + i
+        elif i.endswith('-'):
+            j = i + m
+            
+        k = j.split('-')      
+        for x in range(int(k[0]), int(k[-1]) + 1):
+            s += [x]
+            
+    s = list(set(s))
+    fox.set_severities(s)
+    
+if args.sev_all:
+    flag_dork_selector = True
+    
+    s = []
+    for x in range(1, 11):
+        s += [x]
+        
+    fox.set_severities(s)
 
-if fox.is_verbose(): 
-    pp.p_debug("Using output directory ==> {}".format(fox.get_out_dir()))
-    if fox.get_build_report():
-        pp.p_debug("Output will be saved in JSON format")
+if args.severity and args.sev_all and fox.is_verbose():
+    pp.p_debug("Provided severity range is overridden by `all` switch.") 
+
+if args.sev_quality:
+    flag_dork_selector = True
+    
+    s = []
+    for x in range(7, 11):
+        s += [x]
+    fox.set_severities(s)
+
+if (args.severity or args.sev_all) and args.sev_quality and fox.is_verbose():
+    pp.p_debug("Provided severity (range | `all` switch) is overridden by " + 
+               "`quality` switch.") 
+    
+if args.category:
+    flag_dork_selector = True
+    fox.set_categories(args.category.split(','))
+
+if args.cat_any:
+    flag_dork_selector = True
+    fox.set_categories(["."])
+
+if args.category and args.cat_any and fox.is_verbose():
+    pp.p_debug("Provided categories value is overridden by `any` switch.")
+
+if args.list_dorks:
+    fox.list_dorks()
+    quit()
+    
+if args.query:
+    flag_dork_selector = True
+    fox.set_query(args.query.strip())
+    fox.set_process_dorksdb_flag(args.query_nostop)
+
+if not flag_dork_selector:
+    pp.p_error('Please provide atleast one dork selector from ' + 
+               '`category`, `severity` or `query`.')
+    quit()
+
+if args.domain:
+    domain = args.domain.strip()
+    domain = re.sub(r'^http(s)?://(www\.)?', '', domain)
+    domain = re.sub('/.*(/)?', '', domain)
+
+    fox.set_domain(domain)
+
+if args.ex_query:
+    fox.set_ex_args(args.ex_query.strip())
+
+if args.ua:
+    fox.set_useragent(args.ua.strip())
+
+if args.threads:
+    if args.threads > 0:
+        fox.set_threads(args.threads)
     else:
-        pp.p_debug("Reporting is enabled, along with JSON format")
+        pp.p_error("Please provide some +ve value for threads.")
+        quit()
 
-pp.p_log("Building db.")
-fox.build_db()
+if args.delay:
+    if args.delay > 0:
+        fox.set_delay_min(args.delay)
+        fox.set_delay_max(args.delay)
+    else:
+        pp.p_error("Please provide some +ve value for delay.")
+        quit()
 
-pp.p_log("Building JSON.")
-fox.build_json()
+if args.delay_min:
+    if args.delay_min > 0:
+        fox.set_delay_min(args.delay_min)
+        fox.set_delay_max(args.delay_min + 3)
+    else:
+        pp.p_error("Please provide some +ve value for delay_min.")
+        quit()
 
-if fox.get_build_report():
-    pp.p_log("Building Report.")
-    fox.build_report()
-    pp.p_log("Report saved at '{}'.".format(futil.join_names(\
-            fox.get_out_dir(), 'report.html')))
+if args.delay_max:
+    if args.delay_max > 0:
+        fox.set_delay_max(args.delay_max)
+        if args.delay_max - 3 > 0:
+            fox.set_delay_min(args.delay_max - 3)
+        else:
+            fox.set_delay_min(0)
+    else:
+        pp.p_error("Please provide some +ve value for delay_max.")
+        quit()
+        
+if args.delay_min and args.delay_max:
+    fox.set_delay_min(args.delay_min)
+    fox.set_delay_max(args.delay_max)
 
-pp.p_log("Results saved at '{}'".format(fox.get_out_dir()))
+if args.page_size:
+    if args.page_size <= 0:
+        pp.p_error("Please provide some +ve value for `dork results`.")
+        quit()
+    fox.set_page_size(gsrch.correct_page_size(args.page_size))
+
+if args.no_of_pages:
+    if args.no_of_pages <= 0:
+        pp.p_error("Please provide some +ve value for `pages to request`.")
+        quit()
+    fox.set_no_of_pages(int(args.no_of_pages))
+
+if args.max_results:
+    if args.max_results <= 0:
+        pp.p_error("Please provide some +ve value for `max results`.")
+        quit()
+    fox.set_max_results(args.max_results)
+
+# TODO: FIXME:
+# output dir and report logic/code left
+
+if args.no_ssl_check:
+    fox.set_ssl_check(False)
+
+if args.time_out:
+    if args.time_out <= 0:
+        pp.p_error("Please provide some +ve value for `request timeout`.")
+        quit()
+    fox.set_request_timeout(args.time_out)
+
+if args.proxy_conn:
+    if args.proxy_conn > 0:
+        fox.set_connection_per_proxy(args.proxy_conn)
+    else:
+        pp.p_error("Please provide some +ve value for connection per proxy.")
+
+if args.proxy_open and (args.proxy or args.proxy_file):
+    pp.p_error("Please use only one option from `open proxies` or " + 
+               "(proxy and proxy_file).")
+    quit()
+    
+if args.proxy and args.proxy_file:
+    pp.p_error("Please use only one option from proxy or proxy_file.")
+    quit()
+
+if args.proxy:
+    fox.add_proxy(args.proxy.strip())
+
+if args.proxy_file:
+    for i in futil.get_file_aslist(args.proxy_file):
+        fox.add_proxy(i)
+
+if args.proxy_count:
+    if args.proxy_count <= 0:
+        pp.p_error("Please provide some +ve value for `open proxy count`.")
+        quit()
+
+    fox.set_open_proxy_count(args.proxy_count)
+    
+    if fox.is_verbose() and not args.proxy_open:
+        pp.p_info('Ignoring `open proxy count` as provided without enabling `open proxies` switch.')
+        
+if args.proxy_open:
+    fox.collect_open_proxies()
+
+fox.execute()
+        
