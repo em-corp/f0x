@@ -583,6 +583,7 @@ class F0x:
             try:
                 response = self.fetch_page_response(dork, p, proxy['proxy'])
             except Exception as e:
+                self.release_proxy(proxy)
                 gsrch.session_cleanup()
                 pp.p_error(e)
                 return
