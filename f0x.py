@@ -522,6 +522,9 @@ class F0x:
                         d = re.sub('^dork:', '', l.lstrip().lower())
                         d = d.strip()
                     
+                    if d and j:
+                        break
+                    
                 if j and int(j) in sev_list and d:
                     dorks.append(d)
 
