@@ -11,6 +11,7 @@ import time
 import json
 import threading
 import asyncio
+import random
 from proxybroker import Broker
 from concurrent.futures import ThreadPoolExecutor
 from git import Repo
@@ -38,7 +39,7 @@ def banner():
 parser = argparse.ArgumentParser()
 
 # input
-parser.add_argument('-d', '--domain', help='Specify Target domain.', 
+parser.add_argument('-d', '--domain', help='Specify Target domain.',
                     dest='domain')
 
 parser.add_argument('-q', '--query', help='Specify query/dork manually, and' + 
@@ -86,7 +87,7 @@ parser.add_argument('-pO', '--open-proxies', help='Make use of open public ' +
                     'proxies.', dest='proxy_open', action='store_true')
 
 parser.add_argument('-pC', '--open-proxies-count', help='Try collecting ' + 
-                    '`n` open proxies. (Default: 20)', dest='proxy_count', 
+                    '`n` open proxies. (Default: 20)', dest='proxy_count',
                     type=int)
 
 parser.add_argument('-C', '--conn', help='Max connections per proxy ' + 
@@ -143,12 +144,16 @@ parser.add_argument('-o', '--outdir', help='Specify output directory.',
 parser.add_argument('-oJ', '--out-json', help='Save output in JSON format.',
                     dest='out_fmt_json', action="store_true")
 
-parser.add_argument('-oL', '--out-list', help='Save output in simple list.',
-                    dest='out_fmt_list', action="store_true")
+parser.add_argument('-oX', '--out-xml', help='Save output in XML format.',
+                    dest='out_fmt_xml', action="store_true")
 
 parser.add_argument('-oR', '--out-report', help='Create html report with ' + 
                     'JSON format results.', dest='out_report',
                     action="store_true")
+
+parser.add_argument('--silent', help='Do not print fetched links to stdout, ' + 
+                    'just save them in file.', dest='out_silent',
+                    action='store_true')
 
 args = parser.parse_args()
 
@@ -162,6 +167,15 @@ banner()
 class F0x:
 
     def __init__(self, verbose=False):
+        self._conn_per_proxy_count = None
+        self._proxy_ptr = -1
+        self._out_fmt_json = 1 << 0
+        self._out_fmt_xml = 1 << 1
+        self._out_report = 1 << 2
+        self._outmode = 0
+        self._proxy_lock = threading.Lock()
+        self._count_lock = threading.Lock()
+
         self.verbose = verbose
         self.severities = None
         self.categories = None
@@ -175,8 +189,6 @@ class F0x:
         self.delay_max = 1
         self.connection_per_proxy = 2
         self.proxies_list = None
-        self._conn_per_proxy_count = None
-        self._proxy_ptr = -1
         self.request_timeout = None
         self.ssl_check = True
         self.open_proxy_count = 20
@@ -184,11 +196,8 @@ class F0x:
         self.no_of_pages = 5
         self.max_results = None
         self.outdir = None
-        self.outmode = None
+        self.out_silent = False
         self.results_count = 0
-        
-        self._proxy_lock = threading.Lock()
-        self._count_lock = threading.Lock()
         
         self._load_conf()
 
@@ -305,11 +314,29 @@ class F0x:
     def get_outdir(self):
         return self.outdir
     
-    def set_outmode(self, omode):
-        self.outmode = omode
+    def set_outmode_json(self):
+        self._outmode |= self._out_fmt_json
     
-    def get_outmode(self):
-        return self.outmode
+    def set_outmode_xml(self):
+        self._outmode |= self._out_fmt_xml
+    
+    def set_outmode_report(self):
+        self._outmode |= self._out_report
+        
+    def get_outmode_json(self):
+        return (self._outmode & self._out_fmt_json) == self._out_fmt_json
+        
+    def get_outmode_xml(self):
+        return (self._outmode & self._out_fmt_xml) == self._out_fmt_xml
+    
+    def get_outmode_report(self):
+        return (self._outmode & self._out_report) == self._out_report
+
+    def set_output_silent(self, flag):
+        self.out_silent = flag
+        
+    def is_output_silent(self):
+        return self.out_silent
     
     def set_results_count(self, count):
         self.results_count = count
@@ -351,8 +378,8 @@ class F0x:
     def collect_open_proxies(self):
         proxies = asyncio.Queue()
         broker = Broker(proxies)
-        tasks = asyncio.gather(broker.find(types=['HTTP', 'HTTPS'], 
-                                           limit=self.get_open_proxy_count()), 
+        tasks = asyncio.gather(broker.find(types=['HTTP', 'HTTPS'],
+                                           limit=self.get_open_proxy_count()),
                                            self._record_proxy(proxies))
         
         loop = asyncio.get_event_loop()
@@ -510,12 +537,36 @@ class F0x:
         else:
             ua = UA.get_random_ua()
         
-        return gsrch.fetch(gurl, ua, proxy, self.get_request_timeout(), 
+        return gsrch.fetch(gurl, ua, proxy, self.get_request_timeout(),
                            self.do_ssl_check())
         
-    def save_links(self, links_list):  # FIXME: output
-        for l in links_list:
-            pp.p_log(l)
+    def save_links(self, dork, dname, pnum, links_list):
+        if not self.get_outdir():
+            for l in links_list:
+                pp.p_log(l)
+            return dname
+        
+        append = True
+        if pnum == 1:
+            append = False
+            dname = dutil.create_random_dir(self.get_outdir(), dname)
+            dname = re.sub('^{}[/]?'.format(self.get_outdir()), '', dname)
+            
+            futil.dump_list(futil.
+                            join_names(dutil.get_dir(self.get_outdir(),
+                                                     dname),
+                                                     "{}.info".format(dname)),
+                            ["dork: {}".format(dork)], append)
+            
+        futil.dump_list(futil.
+                        join_names(dutil.get_dir(self.get_outdir(), dname),
+                                   "{}.txt".format(dname)), links_list, append)
+        
+        if not self.is_output_silent():
+            for l in links_list:
+                pp.p_log(l)
+                
+        return dname
     
     def update_results_stats(self, c):
         with self._count_lock:
@@ -570,7 +621,8 @@ class F0x:
     def process_dork(self, dork):
         if self.is_verbose():
             pp.p_debug("Processing dork: {}".format(dork))
-        
+            
+        dname = "dork{}".format(int(random.random() * 1000))
         proxy = self.get_proxy_object()
 
         for p in range(1, self.get_no_of_pages() + 1):
@@ -595,7 +647,7 @@ class F0x:
             if self.is_verbose():
                 pp.p_debug("Found {} url(s).".format(len(links)))
             
-            self.save_links(links)
+            dname = self.save_links(dork, dname, p, links)
             
             self.update_results_stats(len(links))
             
@@ -623,6 +675,81 @@ class F0x:
         
         with ThreadPoolExecutor(max_workers=self.get_threads()) as exec:
             exec.map(self.process_dork, dorks)
+        
+        self.make_report()
+        
+    def make_report(self):
+        if not self.get_outdir():
+            return
+        
+        if not (self.get_outmode_json() or self.get_outmode_report() or 
+                self.get_outmode_xml()):
+            return
+        
+        fdr = None
+        if self.get_outmode_report():
+            fdr = open(futil.join_names(self.get_outdir(), 'index.html') , 'w')
+            fdr.write('<!DOCTYPE html> <html><head><title>f0x Report: links' + 
+                      '</title></head><body>')
+        
+        for ddir in dutil.get_dir_list(self.get_outdir()):
+            dname = re.sub('^{}[/]?'.format(self.get_outdir()), '', ddir)
+
+            links = futil.get_file_aslist(
+                futil.get_file(ddir, "{}.txt".format(dname)))
+            
+            if self.get_outmode_json():
+                with open(futil.join_names(ddir, '{}.json'.format(dname)),
+                          'w') as fd:
+                    fd.write(json.dumps({'urls': links}))
+
+            try:
+                fdh = None
+                fdx = None
+                
+                if self.get_outmode_report():
+                    fdh = open(futil.join_names(ddir, '{}.html'.format(dname)),
+                               'w')
+                    
+                if self.get_outmode_xml():
+                    fdx = open(futil.join_names(ddir, '{}.xml'.format(dname)),
+                               'w')
+                    
+            except Exception as e:
+                pp.p_error(e)
+            else:
+                if fdh:
+                    fdh.write('<!DOCTYPE html> <html><head><title>dork urls' + 
+                              '</title></head><body>')
+                if fdx:
+                    fdx.write('<?xml version="1.0" ?><urls>')
+                
+                for link in links:
+                    if fdh:
+                        fdh.write('<a href="{}">{}</a><br/>'.format(link, link))
+                    
+                    if fdx:
+                        fdx.write('<url>{}</url>'.format(link))
+                
+                if fdx:
+                    fdx.write('</urls>')
+                if fdh:
+                    fdh.write('</body></html>')
+                    
+                if fdr:
+                    fdr.write(('dork: <a href="{}/{}.html">{}</a> urls ' + 
+                               'fetched: {}<br/>').format(dname, dname, dname, 
+                                                          len(links)))
+                    
+            finally:
+                if fdh:
+                    fdh.close()
+                if fdx:
+                    fdx.close()
+        
+        if fdr:
+            fdr.write('</body></html>')
+            fdr.close()
 
                 
 fox = F0x(verbose=args.verbose)
@@ -780,9 +907,30 @@ if args.max_results:
         quit()
     fox.set_max_results(args.max_results)
 
-# TODO: FIXME:
-# output dir and report logic/code left
+if ((args.out_fmt_json or args.out_fmt_xml or args.out_report) and 
+    not args.out_dir): 
+    pp.p_error("Output format is defined without specifying output directory.")
+    quit()
 
+if args.out_silent and not args.out_dir:
+    pp.p_warn("Can't silent links output, as no output directory defined " + 
+               "to save them.")
+
+if args.out_silent:
+    fox.set_output_silent(True)
+
+if args.out_dir:
+    fox.set_outdir(args.out_dir.strip())
+
+if args.out_fmt_json:
+    fox.set_outmode_json()
+    
+if args.out_fmt_xml:
+    fox.set_outmode_xml()
+    
+if args.out_report:
+    fox.set_outmode_report()
+    
 if args.no_ssl_check:
     fox.set_ssl_check(False)
 
@@ -829,4 +977,3 @@ if args.proxy_open:
     fox.collect_open_proxies()
 
 fox.execute()
-        
